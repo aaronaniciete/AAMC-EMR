@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import {
   CalendarDays, Users, Stethoscope, Pill, Home, Search, Plus, X,
   Baby, UserRound, AlertTriangle, ChevronLeft, Clock, FileText,
-  ShieldAlert, LogOut, Trash2, Check, ClipboardList
+  ShieldAlert, LogOut, Trash2, Check, ClipboardList, Pencil
 } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
 
@@ -224,6 +224,13 @@ const COMMON_MEDS_PEDS = [
   { name: "Ofloxacin Otic Drops", dosage: "5 drops", frequency: "AM, NN & PM (3x/day)", duration: "7 days", notes: "For affected ear" },
 ];
 
+// Used to seed the database the first time the app runs — after that, the
+// database is the source of truth and these are never read again.
+const defaultCommonMeds = () => ({
+  adult: COMMON_MEDS_ADULT,
+  peds: COMMON_MEDS_PEDS,
+});
+
 /* ---------------- Physical exam checklist items (from clinic exam form) ---------------- */
 const SYMPTOM_CHECKLIST = [
   "Abdominal pains", "Allergies", "Bleeding tendency", "Bloody or Black Stool",
@@ -344,6 +351,16 @@ async function saveMyProfile(userId, name, role) {
   const { error } = await supabase.from("staff_profiles").upsert({ id: userId, name, role });
   if (error) console.error("saveMyProfile failed", error);
 }
+async function loadCommonMeds() {
+  const { data, error } = await supabase.from("app_state").select("value").eq("key", "common-meds").maybeSingle();
+  if (error) { console.error("loadCommonMeds failed", error); return defaultCommonMeds(); }
+  if (!data) return defaultCommonMeds();
+  return { adult: data.value.adult || [], peds: data.value.peds || [] };
+}
+async function saveCommonMeds(meds) {
+  const { error } = await supabase.from("app_state").upsert({ key: "common-meds", value: meds, updated_at: new Date().toISOString() });
+  if (error) console.error("saveCommonMeds failed", error);
+}
 
 /* ---------------- Dose-column & remarks helpers ---------------- */
 function deriveDoseSlots(freqText, doseText) {
@@ -374,6 +391,7 @@ export default function ClinicEMR() {
   const [data, setData] = useState(emptyData());
   const [staffList, setStaffList] = useState([]);
   const [clinicInfo, setClinicInfo] = useState(defaultClinicInfo());
+  const [commonMeds, setCommonMeds] = useState(defaultCommonMeds());
   const [view, setView] = useState("dashboard");
   const [selectedPatientId, setSelectedPatientId] = useState(null);
   const [toast, setToast] = useState(null);
@@ -396,16 +414,18 @@ export default function ClinicEMR() {
     if (!userId) { setMyProfile(null); return; }
     (async () => {
       setDataLoading(true);
-      const [profile, d, c, allStaff] = await Promise.all([
+      const [profile, d, c, allStaff, meds] = await Promise.all([
         loadMyProfile(userId),
         loadClinicData(),
         loadClinicInfo(),
         loadAllStaffProfiles(),
+        loadCommonMeds(),
       ]);
       setMyProfile(profile);
       setData(d);
       setClinicInfo(c);
       setStaffList(allStaff);
+      setCommonMeds(meds);
       setDataLoading(false);
     })();
   }, [userId]);
@@ -413,6 +433,11 @@ export default function ClinicEMR() {
   const showToast = useCallback((msg) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2200);
+  }, []);
+
+  const persistCommonMeds = useCallback(async (next) => {
+    setCommonMeds(next);
+    await saveCommonMeds(next);
   }, []);
 
   const persist = useCallback(async (next) => {
@@ -516,11 +541,15 @@ export default function ClinicEMR() {
               currentUser={currentUser}
               showToast={showToast}
               clinicInfo={clinicInfo}
+              commonMeds={commonMeds}
               onBack={() => {
                 setSelectedPatientId(null);
                 setView("patients");
               }}
             />
+          )}
+          {view === "medications" && (
+            <MedicationsPage commonMeds={commonMeds} persistCommonMeds={persistCommonMeds} showToast={showToast} />
           )}
           {view === "staff" && (
             <StaffDirectory
@@ -668,6 +697,7 @@ function Sidebar({ view, setView, currentUser, onSignOut }) {
     { key: "dashboard", label: "Dashboard", icon: Home },
     { key: "schedule", label: "Schedule", icon: CalendarDays },
     { key: "patients", label: "Patients", icon: Users },
+    { key: "medications", label: "Medications", icon: Pill },
     { key: "staff", label: "Staff", icon: UserRound },
   ];
   return (
@@ -1048,7 +1078,7 @@ function PatientForm({ onSubmit, initial }) {
 }
 
 /* ---------------- Patient detail ---------------- */
-function PatientDetail({ patient, data, persist, currentUser, showToast, clinicInfo, onBack }) {
+function PatientDetail({ patient, data, persist, currentUser, showToast, clinicInfo, commonMeds, onBack }) {
   const [tab, setTab] = useState("chart");
   const age = calcAge(patient.dob);
   const isPeds = age !== null && age < 18;
@@ -1130,7 +1160,7 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
 
       {tab === "chart" && <ChartTab history={history} onAddNote={addNote} />}
       {tab === "plans" && <PlansTab plans={plans} onAddPlan={addPlan} />}
-      {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} />}
+      {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} commonMeds={commonMeds} />}
       {tab === "forms" && (
         <FormsTab
           certs={certs}
@@ -1253,14 +1283,14 @@ function PlansTab({ plans, onAddPlan }) {
   );
 }
 
-function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider }) {
+function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds }) {
   const [showForm, setShowForm] = useState(false);
   const [meds, setMeds] = useState([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "" }]);
   const [notes, setNotes] = useState("");
   const [openSuggestRow, setOpenSuggestRow] = useState(null);
   const [printRx, setPrintRx] = useState(null);
 
-  const medList = isPeds ? COMMON_MEDS_PEDS : COMMON_MEDS_ADULT;
+  const medList = isPeds ? commonMeds.peds : commonMeds.adult;
 
   function updateMed(i, field, val) {
     setMeds((m) => m.map((row, idx) => (idx === i ? { ...row, [field]: val } : row)));
@@ -2123,6 +2153,140 @@ function PrintableMedCert({ cert, patient, clinicInfo, provider }) {
 }
 
 /* ---------------- Staff directory ---------------- */
+
+/* ---------------- Medications (editable, shared across the clinic) ---------------- */
+function MedicationsPage({ commonMeds, persistCommonMeds, showToast }) {
+  const [tab, setTab] = useState("adult");
+  const [query, setQuery] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [editingIndex, setEditingIndex] = useState(null);
+  const [name, setName] = useState("");
+  const [dosage, setDosage] = useState("");
+  const [frequency, setFrequency] = useState("");
+  const [duration, setDuration] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const list = tab === "adult" ? commonMeds.adult : commonMeds.peds;
+  const filtered = list.filter((m) => m.name.toLowerCase().includes(query.toLowerCase()));
+
+  function resetForm() {
+    setName(""); setDosage(""); setFrequency(""); setDuration(""); setNotes("");
+    setEditingIndex(null); setShowForm(false);
+  }
+
+  function startAdd() {
+    resetForm();
+    setShowForm(true);
+  }
+
+  function startEdit(idx) {
+    const m = list[idx];
+    setName(m.name); setDosage(m.dosage); setFrequency(m.frequency); setDuration(m.duration); setNotes(m.notes || "");
+    setEditingIndex(idx);
+    setShowForm(true);
+  }
+
+  async function saveMed() {
+    if (!name.trim()) return;
+    const entry = { name: name.trim(), dosage: dosage.trim(), frequency: frequency.trim(), duration: duration.trim(), notes: notes.trim() };
+    const nextList = editingIndex === null ? [...list, entry] : list.map((m, i) => (i === editingIndex ? entry : m));
+    const next = { ...commonMeds, [tab === "adult" ? "adult" : "peds"]: nextList };
+    await persistCommonMeds(next);
+    showToast(editingIndex === null ? "Medication added" : "Medication updated");
+    resetForm();
+  }
+
+  async function removeMed(idx) {
+    const nextList = list.filter((_, i) => i !== idx);
+    const next = { ...commonMeds, [tab === "adult" ? "adult" : "peds"]: nextList };
+    await persistCommonMeds(next);
+    showToast("Medication removed");
+  }
+
+  return (
+    <div>
+      <div style={styles.pageHeader}>
+        <h2 style={styles.h2}>Medications</h2>
+        <button style={styles.primaryBtn} onClick={startAdd}><Plus size={15} /> Add medication</button>
+      </div>
+
+      <div style={styles.subNavRow}>
+        <button onClick={() => setTab("adult")} style={{ ...styles.subNavBtn, ...(tab === "adult" ? styles.subNavBtnActive : {}) }}>
+          Adult ({commonMeds.adult.length})
+        </button>
+        <button onClick={() => setTab("peds")} style={{ ...styles.subNavBtn, ...(tab === "peds" ? styles.subNavBtnActive : {}) }}>
+          Pediatric ({commonMeds.peds.length})
+        </button>
+      </div>
+
+      <div style={{ position: "relative", marginBottom: 14 }}>
+        <Search size={15} style={{ position: "absolute", left: 12, top: 11, color: "#8A9793" }} />
+        <input
+          style={{ ...styles.input, paddingLeft: 34 }}
+          placeholder={`Search ${tab === "adult" ? "adult" : "pediatric"} medications…`}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+
+      {showForm && (
+        <div style={styles.card}>
+          <div style={{ fontSize: 11.5, color: "#5B6B68", marginBottom: 10 }}>
+            This is what shows up as a suggestion when staff type a medication name into a{" "}
+            {tab === "adult" ? "adult" : "pediatric"} patient's prescription.
+          </div>
+          <Field label="Medication name">
+            <input style={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Amoxicillin 500mg (Brand)" />
+          </Field>
+          <div style={{ display: "flex", gap: 10 }}>
+            <Field label="Dosage" style={{ flex: 1 }}>
+              <input style={styles.input} value={dosage} onChange={(e) => setDosage(e.target.value)} placeholder="e.g. 1 tab" />
+            </Field>
+            <Field label="Frequency" style={{ flex: 1 }}>
+              <input style={styles.input} value={frequency} onChange={(e) => setFrequency(e.target.value)} placeholder="e.g. AM & PM (2x/day)" />
+            </Field>
+          </div>
+          <Field label="Duration">
+            <input style={styles.input} value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="e.g. 7 days" />
+          </Field>
+          <Field label="Notes (optional)">
+            <input style={styles.input} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Antibiotic — after meals" />
+          </Field>
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <button style={{ ...styles.primaryBtn, justifyContent: "center" }} onClick={saveMed}>
+              <Check size={15} /> {editingIndex === null ? "Add medication" : "Save changes"}
+            </button>
+            <button style={{ ...styles.linkBtn, padding: "9px 14px" }} onClick={resetForm}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      <SectionCard title={`${tab === "adult" ? "Adult" : "Pediatric"} list (${filtered.length})`}>
+        {filtered.length === 0 ? (
+          <EmptyState text={list.length === 0 ? "No medications yet — add the first one above." : "No matches."} />
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {filtered.map((m) => {
+              const idx = list.indexOf(m);
+              return (
+                <div key={m.name + idx} style={styles.patientRow}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, color: "#12312D" }}>{m.name}</div>
+                    <div style={{ fontSize: 12, color: "#5B6B68" }}>
+                      {[m.dosage, m.frequency, m.duration, m.notes].filter(Boolean).join(" · ")}
+                    </div>
+                  </div>
+                  <button style={styles.iconBtn} onClick={() => startEdit(idx)} aria-label="Edit"><Pencil size={14} /></button>
+                  <button style={styles.iconBtn} onClick={() => removeMed(idx)} aria-label="Remove"><Trash2 size={14} /></button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </SectionCard>
+    </div>
+  );
+}
 
 /* ---------------- Staff directory (read-only list; logins are managed in Supabase) ---------------- */
 function StaffDirectory({ staffList, showToast, clinicInfo, persistClinicInfo }) {
