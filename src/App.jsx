@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import {
   CalendarDays, Users, Stethoscope, Pill, Home, Search, Plus, X,
   Baby, UserRound, AlertTriangle, ChevronLeft, Clock, FileText,
-  ShieldAlert, LogOut, Trash2, Check, ClipboardList, Pencil
+  ShieldAlert, LogOut, Trash2, Check, ClipboardList, Pencil, Layers
 } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
 
@@ -193,7 +193,8 @@ const COMMON_MEDS_PEDS = [
   { name: "Guaifenesin + Phenylpropanolamine + Chlorphenamine", dosage: "2.5mL", frequency: "AM, NN & PM (3x/day)", duration: "7 days", notes: "For cough, colds & allergy" },
   { name: "Guaifenesin + Salbutamol", dosage: "5mL", frequency: "AM, NN & PM (3x/day)", duration: "5 days", notes: "For phlegm & to loosen airways" },
   { name: "Phenylephrine + Brompheniramine Syrup (Congestap)", dosage: "5mL", frequency: "AM, NN & PM (3x/day)", duration: "5 days", notes: "For colds" },
-  { name: "Oral Rehydration Salt Solution", dosage: "As directed", frequency: "3x/day", duration: "As needed", notes: "" },
+  { name: "Oral Rehydration Salt Solution (Vivalyte)", dosage: "1 sachet", frequency: "AM, NN & PM (3x/day)", duration: "As needed", notes: "Consume 3 sachets in a day" },
+  { name: "Dibencozide 3mg (Heraclene Forte)", dosage: "3mg, 1 tab", frequency: "NN, 1x/day", duration: "30 days", notes: "Pampagana kumain (appetite stimulant)" },
   { name: "Metronidazole 125mg/5mL", dosage: "mL (see chart)", frequency: "AM, NN & PM (3x/day)", duration: "7 days", notes: "Antibiotic — after meals" },
   { name: "Cefaclor 250mg/5mL", dosage: "mL (see chart)", frequency: "AM, NN & PM (3x/day)", duration: "7 days", notes: "Antibiotic — after meals" },
   { name: "Albendazole 400mg", dosage: "1 tablet", frequency: "Once daily", duration: "1 day", notes: "Deworming" },
@@ -229,6 +230,35 @@ const COMMON_MEDS_PEDS = [
 const defaultCommonMeds = () => ({
   adult: COMMON_MEDS_ADULT,
   peds: COMMON_MEDS_PEDS,
+});
+
+// One starter template built from the clinic's own pediatric pneumonia/URTI pad —
+// everything else starts empty; add more from the new "Rx Templates" page in-app.
+const defaultRxTemplates = () => ({
+  adult: [],
+  peds: [
+    {
+      id: "seed-pcap-ab",
+      label: "PCAP A-B",
+      meds: [
+        { name: "Cefuroxime 250mg/5mL (Eoroxime)", qty: "1", am: "1.5mL", nn: "0", pm: "1.5mL", remarks: "for 7 days after meals" },
+        { name: "Co-Amoxiclav 312.5mg/5mL", qty: "1", am: "1.5mL", nn: "1.5mL", pm: "1.5mL", remarks: "for 7 days after meals" },
+        { name: "Cefixime 100mg/5mL (Zelpis)", qty: "1", am: "1.5mL", nn: "0", pm: "1.5mL", remarks: "for 7 days after meals" },
+        { name: "N-Acetylcysteine 200mg", qty: "10", am: "1", nn: "0", pm: "1", remarks: "for 5 days" },
+        { name: "Cetirizine 5mg/5mL (Cetzy)", qty: "1", am: "0", nn: "0", pm: "", remarks: "for 7 days" },
+        { name: "Salbutamol nebule + 1mL Sodium Chloride", qty: "15", am: "1", nn: "1", pm: "1", remarks: "for 5 days" },
+        { name: "Prednisolone 20mg/5mL (Medsone)", qty: "1", am: "0", nn: "", pm: "0", remarks: "for 5 days after meals" },
+        { name: "Vitamin C + Zinc (Pediafortan C Plus)", qty: "2", am: "0", nn: "1", pm: "0", remarks: "for 30 days" },
+        { name: "Multivitamins + Iron", qty: "2", am: "0", nn: "", pm: "0", remarks: "for 30 days" },
+        { name: "Paracetamol 250mg/5mL", qty: "1", am: "", nn: "", pm: "", remarks: "every 4 hours for fever or pain" },
+        { name: "Oral Rehydration Salt Solution (Vivalyte)", qty: "9", am: "1", nn: "1", pm: "1", remarks: "consume 3 sachets in a day" },
+        { name: "Guaifenesin + Phenylpropanolamine + Chlorphenamine", qty: "1", am: "2.5mL", nn: "2.5mL", pm: "2.5mL", remarks: "for 7 days" },
+        { name: "Guaifenesin + Salbutamol", qty: "1", am: "5mL", nn: "5mL", pm: "5mL", remarks: "for 5 days" },
+        { name: "Phenylephrine, Brompheniramine Syrup (Congestap)", qty: "1", am: "5mL", nn: "5mL", pm: "5mL", remarks: "for 5 days" },
+        { name: "Dibencozide 3mg (Heraclene Forte)", qty: "90", am: "0", nn: "1", pm: "0", remarks: "for 30 days" },
+      ],
+    },
+  ],
 });
 
 /* ---------------- Physical exam checklist items (from clinic exam form) ---------------- */
@@ -361,6 +391,16 @@ async function saveCommonMeds(meds) {
   const { error } = await supabase.from("app_state").upsert({ key: "common-meds", value: meds, updated_at: new Date().toISOString() });
   if (error) console.error("saveCommonMeds failed", error);
 }
+async function loadRxTemplates() {
+  const { data, error } = await supabase.from("app_state").select("value").eq("key", "rx-templates").maybeSingle();
+  if (error) { console.error("loadRxTemplates failed", error); return defaultRxTemplates(); }
+  if (!data) return defaultRxTemplates();
+  return { adult: data.value.adult || [], peds: data.value.peds || [] };
+}
+async function saveRxTemplates(templates) {
+  const { error } = await supabase.from("app_state").upsert({ key: "rx-templates", value: templates, updated_at: new Date().toISOString() });
+  if (error) console.error("saveRxTemplates failed", error);
+}
 
 /* ---------------- Dose-column & remarks helpers ---------------- */
 function deriveDoseSlots(freqText, doseText) {
@@ -392,6 +432,7 @@ export default function ClinicEMR() {
   const [staffList, setStaffList] = useState([]);
   const [clinicInfo, setClinicInfo] = useState(defaultClinicInfo());
   const [commonMeds, setCommonMeds] = useState(defaultCommonMeds());
+  const [rxTemplates, setRxTemplates] = useState(defaultRxTemplates());
   const [view, setView] = useState("dashboard");
   const [selectedPatientId, setSelectedPatientId] = useState(null);
   const [toast, setToast] = useState(null);
@@ -414,18 +455,20 @@ export default function ClinicEMR() {
     if (!userId) { setMyProfile(null); return; }
     (async () => {
       setDataLoading(true);
-      const [profile, d, c, allStaff, meds] = await Promise.all([
+      const [profile, d, c, allStaff, meds, templates] = await Promise.all([
         loadMyProfile(userId),
         loadClinicData(),
         loadClinicInfo(),
         loadAllStaffProfiles(),
         loadCommonMeds(),
+        loadRxTemplates(),
       ]);
       setMyProfile(profile);
       setData(d);
       setClinicInfo(c);
       setStaffList(allStaff);
       setCommonMeds(meds);
+      setRxTemplates(templates);
       setDataLoading(false);
     })();
   }, [userId]);
@@ -438,6 +481,11 @@ export default function ClinicEMR() {
   const persistCommonMeds = useCallback(async (next) => {
     setCommonMeds(next);
     await saveCommonMeds(next);
+  }, []);
+
+  const persistRxTemplates = useCallback(async (next) => {
+    setRxTemplates(next);
+    await saveRxTemplates(next);
   }, []);
 
   const persist = useCallback(async (next) => {
@@ -542,6 +590,7 @@ export default function ClinicEMR() {
               showToast={showToast}
               clinicInfo={clinicInfo}
               commonMeds={commonMeds}
+              rxTemplates={rxTemplates}
               onBack={() => {
                 setSelectedPatientId(null);
                 setView("patients");
@@ -550,6 +599,14 @@ export default function ClinicEMR() {
           )}
           {view === "medications" && (
             <MedicationsPage commonMeds={commonMeds} persistCommonMeds={persistCommonMeds} showToast={showToast} />
+          )}
+          {view === "templates" && (
+            <RxTemplatesPage
+              rxTemplates={rxTemplates}
+              persistRxTemplates={persistRxTemplates}
+              commonMeds={commonMeds}
+              showToast={showToast}
+            />
           )}
           {view === "staff" && (
             <StaffDirectory
@@ -698,6 +755,7 @@ function Sidebar({ view, setView, currentUser, onSignOut }) {
     { key: "schedule", label: "Schedule", icon: CalendarDays },
     { key: "patients", label: "Patients", icon: Users },
     { key: "medications", label: "Medications", icon: Pill },
+    { key: "templates", label: "Rx Templates", icon: Layers },
     { key: "staff", label: "Staff", icon: UserRound },
   ];
   return (
@@ -1078,7 +1136,7 @@ function PatientForm({ onSubmit, initial }) {
 }
 
 /* ---------------- Patient detail ---------------- */
-function PatientDetail({ patient, data, persist, currentUser, showToast, clinicInfo, commonMeds, onBack }) {
+function PatientDetail({ patient, data, persist, currentUser, showToast, clinicInfo, commonMeds, rxTemplates, onBack }) {
   const [tab, setTab] = useState("chart");
   const age = calcAge(patient.dob);
   const isPeds = age !== null && age < 18;
@@ -1160,7 +1218,7 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
 
       {tab === "chart" && <ChartTab history={history} onAddNote={addNote} />}
       {tab === "plans" && <PlansTab plans={plans} onAddPlan={addPlan} />}
-      {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} commonMeds={commonMeds} />}
+      {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} commonMeds={commonMeds} rxTemplates={rxTemplates} />}
       {tab === "forms" && (
         <FormsTab
           certs={certs}
@@ -1283,7 +1341,7 @@ function PlansTab({ plans, onAddPlan }) {
   );
 }
 
-function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds }) {
+function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds, rxTemplates }) {
   const [showForm, setShowForm] = useState(false);
   const [meds, setMeds] = useState([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "" }]);
   const [notes, setNotes] = useState("");
@@ -1291,6 +1349,11 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds 
   const [printRx, setPrintRx] = useState(null);
 
   const medList = isPeds ? commonMeds.peds : commonMeds.adult;
+  const templateList = isPeds ? rxTemplates.peds : rxTemplates.adult;
+
+  function applyTemplate(tpl) {
+    setMeds(tpl.meds.map((m) => ({ ...m })));
+  }
 
   function updateMed(i, field, val) {
     setMeds((m) => m.map((row, idx) => (idx === i ? { ...row, [field]: val } : row)));
@@ -1330,6 +1393,24 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds 
       </div>
       {showForm && (
         <div style={styles.card}>
+          {templateList.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#12312D", marginBottom: 6 }}>
+                Use a diagnosis template
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {templateList.map((tpl) => (
+                  <button key={tpl.id} type="button" style={styles.pillToggle} onClick={() => applyTemplate(tpl)}>
+                    {tpl.label} ({tpl.meds.length})
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: 11, color: "#8A9793", marginTop: 6 }}>
+                Fills in every medication from the template at once — delete any rows that don't apply
+                (e.g. pick one antibiotic out of several options) before saving.
+              </div>
+            </div>
+          )}
           <div style={{ fontSize: 11.5, color: "#5B6B68", marginBottom: 10 }}>
             Showing common {isPeds ? "pediatric" : "adult"} medications as you type — start typing a medication
             name (3+ letters) and pick a match to auto-fill quantity slots and remarks. You can still edit
@@ -2281,6 +2362,177 @@ function MedicationsPage({ commonMeds, persistCommonMeds, showToast }) {
                 </div>
               );
             })}
+          </div>
+        )}
+      </SectionCard>
+    </div>
+  );
+}
+
+/* ---------------- Rx Templates (diagnosis bundles) ---------------- */
+function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, showToast }) {
+  const [tab, setTab] = useState("peds");
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [label, setLabel] = useState("");
+  const [meds, setMeds] = useState([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "" }]);
+  const [openSuggestRow, setOpenSuggestRow] = useState(null);
+
+  const list = tab === "adult" ? rxTemplates.adult : rxTemplates.peds;
+  const medList = tab === "adult" ? commonMeds.adult : commonMeds.peds;
+
+  function resetForm() {
+    setLabel("");
+    setMeds([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "" }]);
+    setEditingId(null);
+    setShowForm(false);
+  }
+
+  function startAdd() {
+    resetForm();
+    setShowForm(true);
+  }
+
+  function startEdit(tpl) {
+    setLabel(tpl.label);
+    setMeds(tpl.meds.map((m) => ({ ...m })));
+    setEditingId(tpl.id);
+    setShowForm(true);
+  }
+
+  function updateMed(i, field, val) {
+    setMeds((m) => m.map((row, idx) => (idx === i ? { ...row, [field]: val } : row)));
+  }
+  function addMedRow() {
+    setMeds((m) => [...m, { name: "", qty: "", am: "", nn: "", pm: "", remarks: "" }]);
+  }
+  function removeMedRow(i) {
+    setMeds((m) => m.filter((_, idx) => idx !== i));
+  }
+  function pickSuggestion(i, med) {
+    const slots = deriveDoseSlots(med.frequency, med.dosage);
+    const remarks = buildRemarks(med.duration, med.notes);
+    setMeds((m) => m.map((row, idx) => (idx === i ? { ...row, name: med.name, am: slots.am, nn: slots.nn, pm: slots.pm, remarks } : row)));
+    setOpenSuggestRow(null);
+  }
+
+  async function saveTemplate() {
+    const validMeds = meds.filter((m) => m.name.trim());
+    if (!label.trim() || validMeds.length === 0) return;
+    const entry = { id: editingId || uid("tpl"), label: label.trim(), meds: validMeds };
+    const nextList = editingId ? list.map((t) => (t.id === editingId ? entry : t)) : [...list, entry];
+    const next = { ...rxTemplates, [tab === "adult" ? "adult" : "peds"]: nextList };
+    await persistRxTemplates(next);
+    showToast(editingId ? "Template updated" : "Template created");
+    resetForm();
+  }
+
+  async function removeTemplate(id) {
+    const nextList = list.filter((t) => t.id !== id);
+    const next = { ...rxTemplates, [tab === "adult" ? "adult" : "peds"]: nextList };
+    await persistRxTemplates(next);
+    showToast("Template removed");
+  }
+
+  return (
+    <div>
+      <div style={styles.pageHeader}>
+        <h2 style={styles.h2}>Rx Templates</h2>
+        <button style={styles.primaryBtn} onClick={startAdd}><Plus size={15} /> New template</button>
+      </div>
+      <div style={{ fontSize: 12.5, color: "#5B6B68", marginBottom: 14 }}>
+        Save a diagnosis as a bundle of medications (like "PCAP A-B" or "URTI") so a whole prescription
+        fills in with one click instead of adding each drug by hand.
+      </div>
+
+      <div style={styles.subNavRow}>
+        <button onClick={() => setTab("adult")} style={{ ...styles.subNavBtn, ...(tab === "adult" ? styles.subNavBtnActive : {}) }}>
+          Adult ({rxTemplates.adult.length})
+        </button>
+        <button onClick={() => setTab("peds")} style={{ ...styles.subNavBtn, ...(tab === "peds" ? styles.subNavBtnActive : {}) }}>
+          Pediatric ({rxTemplates.peds.length})
+        </button>
+      </div>
+
+      {showForm && (
+        <div style={styles.card}>
+          <Field label="Diagnosis / template name">
+            <input style={styles.input} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. PCAP A-B, URTI, Bronchitis" />
+          </Field>
+
+          <div style={{ display: "flex", gap: 8, fontSize: 11, color: "#8A9793", padding: "10px 0 4px", fontWeight: 600 }}>
+            <div style={{ flex: 2 }}></div>
+            <div style={{ width: 56, textAlign: "center" }}>No.</div>
+            <div style={{ width: 50, textAlign: "center" }}>AM</div>
+            <div style={{ width: 50, textAlign: "center" }}>NN</div>
+            <div style={{ width: 50, textAlign: "center" }}>PM</div>
+            <div style={{ flex: 1.4 }}></div>
+          </div>
+          {meds.map((row, i) => {
+            const q = row.name.trim().toLowerCase();
+            const suggestions = q.length >= 3 ? medList.filter((m) => m.name.toLowerCase().includes(q)).slice(0, 6) : [];
+            return (
+              <div key={i} style={{ marginBottom: 8 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                  <Field label="Medication" style={{ flex: 2, position: "relative" }}>
+                    <input
+                      style={styles.input}
+                      value={row.name}
+                      onChange={(e) => { updateMed(i, "name", e.target.value); setOpenSuggestRow(i); }}
+                      onFocus={() => setOpenSuggestRow(i)}
+                      onBlur={() => setTimeout(() => setOpenSuggestRow((r) => (r === i ? null : r)), 120)}
+                      placeholder="Start typing…"
+                      autoComplete="off"
+                    />
+                    {openSuggestRow === i && suggestions.length > 0 && (
+                      <div style={styles.suggestBox}>
+                        {suggestions.map((m) => (
+                          <div key={m.name} style={styles.suggestItem} onMouseDown={() => pickSuggestion(i, m)}>
+                            <div style={{ fontWeight: 600, fontSize: 13 }}>{m.name}</div>
+                            <div style={{ fontSize: 11.5, color: "#5B6B68" }}>{m.dosage} · {m.frequency} · {m.duration}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Field>
+                  <input style={{ ...styles.input, width: 56, textAlign: "center" }} value={row.qty} onChange={(e) => updateMed(i, "qty", e.target.value)} placeholder="No." />
+                  <input style={{ ...styles.input, width: 50, textAlign: "center" }} value={row.am} onChange={(e) => updateMed(i, "am", e.target.value)} placeholder="0" />
+                  <input style={{ ...styles.input, width: 50, textAlign: "center" }} value={row.nn} onChange={(e) => updateMed(i, "nn", e.target.value)} placeholder="0" />
+                  <input style={{ ...styles.input, width: 50, textAlign: "center" }} value={row.pm} onChange={(e) => updateMed(i, "pm", e.target.value)} placeholder="0" />
+                  <input style={{ ...styles.input, flex: 1.4 }} value={row.remarks} onChange={(e) => updateMed(i, "remarks", e.target.value)} placeholder="e.g. for 7 days after meals" />
+                  {meds.length > 1 && (
+                    <button style={styles.iconBtn} onClick={() => removeMedRow(i)} aria-label="Remove"><Trash2 size={14} /></button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          <button style={styles.linkBtn} onClick={addMedRow}><Plus size={13} /> Add another medication</button>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button style={{ ...styles.primaryBtn, justifyContent: "center" }} onClick={saveTemplate}>
+              <Check size={15} /> {editingId ? "Save changes" : "Save template"}
+            </button>
+            <button style={{ ...styles.linkBtn, padding: "9px 14px" }} onClick={resetForm}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      <SectionCard title={`${tab === "adult" ? "Adult" : "Pediatric"} templates`}>
+        {list.length === 0 ? (
+          <EmptyState text="No templates yet — create one above." />
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {list.map((tpl) => (
+              <div key={tpl.id} style={styles.patientRow}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, color: "#12312D" }}>{tpl.label}</div>
+                  <div style={{ fontSize: 12, color: "#5B6B68" }}>{tpl.meds.length} medications</div>
+                </div>
+                <button style={styles.iconBtn} onClick={() => startEdit(tpl)} aria-label="Edit"><Pencil size={14} /></button>
+                <button style={styles.iconBtn} onClick={() => removeTemplate(tpl.id)} aria-label="Remove"><Trash2 size={14} /></button>
+              </div>
+            ))}
           </div>
         )}
       </SectionCard>
