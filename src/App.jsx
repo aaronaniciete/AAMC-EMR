@@ -240,32 +240,29 @@ const defaultCommonMeds = () => {
 
 // One starter template built from the clinic's own pediatric pneumonia/URTI pad —
 // everything else starts empty; add more from the new "Rx Templates" page in-app.
-const defaultRxTemplates = () => ({
-  adult: [],
-  peds: [
-    {
-      id: "seed-pcap-ab",
-      label: "PCAP A-B",
-      meds: [
-        { name: "Cefuroxime 250mg/5mL (Eoroxime)", qty: "1", am: "1.5mL", nn: "0", pm: "1.5mL", remarks: "for 7 days after meals" },
-        { name: "Co-Amoxiclav 312.5mg/5mL", qty: "1", am: "1.5mL", nn: "1.5mL", pm: "1.5mL", remarks: "for 7 days after meals" },
-        { name: "Cefixime 100mg/5mL (Zelpis)", qty: "1", am: "1.5mL", nn: "0", pm: "1.5mL", remarks: "for 7 days after meals" },
-        { name: "N-Acetylcysteine 200mg", qty: "10", am: "1", nn: "0", pm: "1", remarks: "for 5 days" },
-        { name: "Cetirizine 5mg/5mL (Cetzy)", qty: "1", am: "0", nn: "0", pm: "", remarks: "for 7 days" },
-        { name: "Salbutamol nebule + 1mL Sodium Chloride", qty: "15", am: "1", nn: "1", pm: "1", remarks: "for 5 days" },
-        { name: "Prednisolone 20mg/5mL (Medsone)", qty: "1", am: "0", nn: "", pm: "0", remarks: "for 5 days after meals" },
-        { name: "Vitamin C + Zinc (Pediafortan C Plus)", qty: "2", am: "0", nn: "1", pm: "0", remarks: "for 30 days" },
-        { name: "Multivitamins + Iron", qty: "2", am: "0", nn: "", pm: "0", remarks: "for 30 days" },
-        { name: "Paracetamol 250mg/5mL", qty: "1", am: "", nn: "", pm: "", remarks: "every 4 hours for fever or pain" },
-        { name: "Oral Rehydration Salt Solution (Vivalyte)", qty: "9", am: "1", nn: "1", pm: "1", remarks: "consume 3 sachets in a day" },
-        { name: "Guaifenesin + Phenylpropanolamine + Chlorphenamine", qty: "1", am: "2.5mL", nn: "2.5mL", pm: "2.5mL", remarks: "for 7 days" },
-        { name: "Guaifenesin + Salbutamol", qty: "1", am: "5mL", nn: "5mL", pm: "5mL", remarks: "for 5 days" },
-        { name: "Phenylephrine, Brompheniramine Syrup (Congestap)", qty: "1", am: "5mL", nn: "5mL", pm: "5mL", remarks: "for 5 days" },
-        { name: "Dibencozide 3mg (Heraclene Forte)", qty: "90", am: "0", nn: "1", pm: "0", remarks: "for 30 days" },
-      ],
-    },
-  ],
-});
+const defaultRxTemplates = () => [
+  {
+    id: "seed-pcap-ab",
+    label: "PCAP A-B",
+    meds: [
+      { name: "Cefuroxime 250mg/5mL (Eoroxime)", qty: "1", am: "1.5mL", nn: "0", pm: "1.5mL", remarks: "for 7 days after meals" },
+      { name: "Co-Amoxiclav 312.5mg/5mL", qty: "1", am: "1.5mL", nn: "1.5mL", pm: "1.5mL", remarks: "for 7 days after meals" },
+      { name: "Cefixime 100mg/5mL (Zelpis)", qty: "1", am: "1.5mL", nn: "0", pm: "1.5mL", remarks: "for 7 days after meals" },
+      { name: "N-Acetylcysteine 200mg", qty: "10", am: "1", nn: "0", pm: "1", remarks: "for 5 days" },
+      { name: "Cetirizine 5mg/5mL (Cetzy)", qty: "1", am: "0", nn: "0", pm: "", remarks: "for 7 days" },
+      { name: "Salbutamol nebule + 1mL Sodium Chloride", qty: "15", am: "1", nn: "1", pm: "1", remarks: "for 5 days" },
+      { name: "Prednisolone 20mg/5mL (Medsone)", qty: "1", am: "0", nn: "", pm: "0", remarks: "for 5 days after meals" },
+      { name: "Vitamin C + Zinc (Pediafortan C Plus)", qty: "2", am: "0", nn: "1", pm: "0", remarks: "for 30 days" },
+      { name: "Multivitamins + Iron", qty: "2", am: "0", nn: "", pm: "0", remarks: "for 30 days" },
+      { name: "Paracetamol 250mg/5mL", qty: "1", am: "", nn: "", pm: "", remarks: "every 4 hours for fever or pain" },
+      { name: "Oral Rehydration Salt Solution (Vivalyte)", qty: "9", am: "1", nn: "1", pm: "1", remarks: "consume 3 sachets in a day" },
+      { name: "Guaifenesin + Phenylpropanolamine + Chlorphenamine", qty: "1", am: "2.5mL", nn: "2.5mL", pm: "2.5mL", remarks: "for 7 days" },
+      { name: "Guaifenesin + Salbutamol", qty: "1", am: "5mL", nn: "5mL", pm: "5mL", remarks: "for 5 days" },
+      { name: "Phenylephrine, Brompheniramine Syrup (Congestap)", qty: "1", am: "5mL", nn: "5mL", pm: "5mL", remarks: "for 5 days" },
+      { name: "Dibencozide 3mg (Heraclene Forte)", qty: "90", am: "0", nn: "1", pm: "0", remarks: "for 30 days" },
+    ],
+  },
+];
 
 /* ---------------- Physical exam checklist items (from clinic exam form) ---------------- */
 const SYMPTOM_CHECKLIST = [
@@ -417,7 +414,15 @@ async function loadRxTemplates() {
   const { data, error } = await supabase.from("app_state").select("value").eq("key", "rx-templates").maybeSingle();
   if (error) { console.error("loadRxTemplates failed", error); return defaultRxTemplates(); }
   if (!data) return defaultRxTemplates();
-  return { adult: data.value.adult || [], peds: data.value.peds || [] };
+  const v = data.value;
+  // Migrate old {adult:[...], peds:[...]} shape into one flat list of templates.
+  if (Array.isArray(v)) return v;
+  if (v && (Array.isArray(v.adult) || Array.isArray(v.peds))) {
+    const flat = [...(v.adult || []), ...(v.peds || [])];
+    await saveRxTemplates(flat); // persist the migration so it only happens once
+    return flat;
+  }
+  return defaultRxTemplates();
 }
 async function saveRxTemplates(templates) {
   const { error } = await supabase.from("app_state").upsert({ key: "rx-templates", value: templates, updated_at: new Date().toISOString() });
@@ -1367,7 +1372,7 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
   const [printRx, setPrintRx] = useState(null);
 
   const medList = commonMeds;
-  const templateList = isPeds ? rxTemplates.peds : rxTemplates.adult;
+  const templateList = rxTemplates;
 
   function applyTemplate(tpl) {
     setMeds(tpl.meds.map((m) => ({ ...m })));
@@ -2380,14 +2385,13 @@ function MedicationsPage({ commonMeds, persistCommonMeds, showToast }) {
 
 /* ---------------- Rx Templates (diagnosis bundles) ---------------- */
 function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, showToast }) {
-  const [tab, setTab] = useState("peds");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [label, setLabel] = useState("");
   const [meds, setMeds] = useState([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "" }]);
   const [openSuggestRow, setOpenSuggestRow] = useState(null);
 
-  const list = tab === "adult" ? rxTemplates.adult : rxTemplates.peds;
+  const list = rxTemplates;
   const medList = commonMeds;
 
   function resetForm() {
@@ -2430,16 +2434,14 @@ function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, showToas
     if (!label.trim() || validMeds.length === 0) return;
     const entry = { id: editingId || uid("tpl"), label: label.trim(), meds: validMeds };
     const nextList = editingId ? list.map((t) => (t.id === editingId ? entry : t)) : [...list, entry];
-    const next = { ...rxTemplates, [tab === "adult" ? "adult" : "peds"]: nextList };
-    await persistRxTemplates(next);
+    await persistRxTemplates(nextList);
     showToast(editingId ? "Template updated" : "Template created");
     resetForm();
   }
 
   async function removeTemplate(id) {
     const nextList = list.filter((t) => t.id !== id);
-    const next = { ...rxTemplates, [tab === "adult" ? "adult" : "peds"]: nextList };
-    await persistRxTemplates(next);
+    await persistRxTemplates(nextList);
     showToast("Template removed");
   }
 
@@ -2451,16 +2453,8 @@ function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, showToas
       </div>
       <div style={{ fontSize: 12.5, color: "#5B6B68", marginBottom: 14 }}>
         Save a diagnosis as a bundle of medications (like "PCAP A-B" or "URTI") so a whole prescription
-        fills in with one click instead of adding each drug by hand.
-      </div>
-
-      <div style={styles.subNavRow}>
-        <button onClick={() => setTab("adult")} style={{ ...styles.subNavBtn, ...(tab === "adult" ? styles.subNavBtnActive : {}) }}>
-          Adult ({rxTemplates.adult.length})
-        </button>
-        <button onClick={() => setTab("peds")} style={{ ...styles.subNavBtn, ...(tab === "peds" ? styles.subNavBtnActive : {}) }}>
-          Pediatric ({rxTemplates.peds.length})
-        </button>
+        fills in with one click instead of adding each drug by hand. One shared list — pick whichever
+        template fits the patient in front of you.
       </div>
 
       {showForm && (
@@ -2527,7 +2521,7 @@ function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, showToas
         </div>
       )}
 
-      <SectionCard title={`${tab === "adult" ? "Adult" : "Pediatric"} templates`}>
+      <SectionCard title={`Templates (${list.length})`}>
         {list.length === 0 ? (
           <EmptyState text="No templates yet — create one above." />
         ) : (
