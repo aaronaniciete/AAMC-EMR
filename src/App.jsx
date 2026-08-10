@@ -266,6 +266,9 @@ const defaultRxTemplates = () => [
   },
 ];
 
+// Saved bundles of commonly-requested lab/diagnostic tests — starts empty, built entirely in-app.
+const defaultLabTemplates = () => [];
+
 /* ---------------- Physical exam checklist items (from clinic exam form) ---------------- */
 const SYMPTOM_CHECKLIST = [
   "Abdominal pains", "Allergies", "Bleeding tendency", "Bloody or Black Stool",
@@ -442,6 +445,16 @@ async function saveRxTemplates(templates) {
   const { error } = await supabase.from("app_state").upsert({ key: "rx-templates", value: templates, updated_at: new Date().toISOString() });
   if (error) console.error("saveRxTemplates failed", error);
 }
+async function loadLabTemplates() {
+  const { data, error } = await supabase.from("app_state").select("value").eq("key", "lab-templates").maybeSingle();
+  if (error) { console.error("loadLabTemplates failed", error); return defaultLabTemplates(); }
+  if (!data) return defaultLabTemplates();
+  return Array.isArray(data.value) ? data.value : defaultLabTemplates();
+}
+async function saveLabTemplates(templates) {
+  const { error } = await supabase.from("app_state").upsert({ key: "lab-templates", value: templates, updated_at: new Date().toISOString() });
+  if (error) console.error("saveLabTemplates failed", error);
+}
 
 /* ---------------- Dose-column & remarks helpers ---------------- */
 function deriveDoseSlots(freqText, doseText) {
@@ -474,6 +487,7 @@ export default function ClinicEMR() {
   const [clinicInfo, setClinicInfo] = useState(defaultClinicInfo());
   const [commonMeds, setCommonMeds] = useState(defaultCommonMeds());
   const [rxTemplates, setRxTemplates] = useState(defaultRxTemplates());
+  const [labTemplates, setLabTemplates] = useState(defaultLabTemplates());
   const [view, setView] = useState("dashboard");
   const [selectedPatientId, setSelectedPatientId] = useState(null);
   const [toast, setToast] = useState(null);
@@ -496,13 +510,14 @@ export default function ClinicEMR() {
     if (!userId) { setMyProfile(null); return; }
     (async () => {
       setDataLoading(true);
-      const [profile, d, c, allStaff, meds, templates] = await Promise.all([
+      const [profile, d, c, allStaff, meds, templates, labTpls] = await Promise.all([
         loadMyProfile(userId),
         loadClinicData(),
         loadClinicInfo(),
         loadAllStaffProfiles(),
         loadCommonMeds(),
         loadRxTemplates(),
+        loadLabTemplates(),
       ]);
       setMyProfile(profile);
       setData(d);
@@ -510,6 +525,7 @@ export default function ClinicEMR() {
       setStaffList(allStaff);
       setCommonMeds(meds);
       setRxTemplates(templates);
+      setLabTemplates(labTpls);
       setDataLoading(false);
     })();
   }, [userId]);
@@ -527,6 +543,11 @@ export default function ClinicEMR() {
   const persistRxTemplates = useCallback(async (next) => {
     setRxTemplates(next);
     await saveRxTemplates(next);
+  }, []);
+
+  const persistLabTemplates = useCallback(async (next) => {
+    setLabTemplates(next);
+    await saveLabTemplates(next);
   }, []);
 
   const persist = useCallback(async (next) => {
@@ -633,6 +654,8 @@ export default function ClinicEMR() {
               clinicInfo={clinicInfo}
               commonMeds={commonMeds}
               rxTemplates={rxTemplates}
+              labTemplates={labTemplates}
+              persistLabTemplates={persistLabTemplates}
               onBack={() => {
                 setSelectedPatientId(null);
                 setView("patients");
@@ -1186,7 +1209,7 @@ const PATIENT_EDITABLE_FIELDS = [
   { key: "allergies", label: "Allergies" },
 ];
 
-function PatientDetail({ patient, data, persist, currentUser, showToast, clinicInfo, commonMeds, rxTemplates, onBack }) {
+function PatientDetail({ patient, data, persist, currentUser, showToast, clinicInfo, commonMeds, rxTemplates, labTemplates, persistLabTemplates, onBack }) {
   const [tab, setTab] = useState("chart");
   const [formsJumpTo, setFormsJumpTo] = useState(null); // lets "Order Labs" (in Treatment Plans) open Forms straight to the lab request
   const [showEditPatient, setShowEditPatient] = useState(false);
@@ -1327,6 +1350,9 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
           clinicInfo={clinicInfo}
           provider={currentUser.name}
           onAddLabRequest={addLabRequest}
+          labTemplates={labTemplates}
+          persistLabTemplates={persistLabTemplates}
+          showToast={showToast}
           jumpTo={formsJumpTo}
           onJumped={() => setFormsJumpTo(null)}
         />
@@ -1730,7 +1756,7 @@ function PrintableRx({ rx, patient, clinicInfo, provider }) {
 }
 
 /* ---------------- Forms (Medical Certificate, etc.) ---------------- */
-function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAddLabRequest, patient, clinicInfo, provider, jumpTo, onJumped }) {
+function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAddLabRequest, patient, clinicInfo, provider, jumpTo, onJumped, labTemplates, persistLabTemplates, showToast }) {
   const [formType, setFormType] = useState("cert");
   const [autoOpenLabs, setAutoOpenLabs] = useState(false);
 
@@ -1779,6 +1805,9 @@ function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAd
           provider={provider}
           autoOpen={autoOpenLabs}
           onAutoOpened={() => setAutoOpenLabs(false)}
+          labTemplates={labTemplates}
+          persistLabTemplates={persistLabTemplates}
+          showToast={showToast}
         />
       )}
     </div>
@@ -2390,12 +2419,132 @@ function PrintableMedCert({ cert, patient, clinicInfo, provider }) {
 }
 
 /* ---------------- Laboratory & Diagnostic Request section ---------------- */
-function LabRequestSection({ labRequests, onAddLabRequest, patient, clinicInfo, provider, autoOpen, onAutoOpened }) {
+function LabChecklistFields({ checks, onToggle, detailChecks, onToggleDetail, detailText, onDetailTextChange, columns = 3 }) {
+  return (
+    <div>
+      <CheckGroup items={LAB_TEST_CHECKLIST} checked={checks} onToggle={onToggle} columns={columns} />
+      <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+        {LAB_TEST_WITH_DETAIL.map((label) => (
+          <div key={label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <label style={{ ...styles.checkItem, padding: 0, width: 100, flexShrink: 0 }}>
+              <input type="checkbox" checked={!!detailChecks[label]} onChange={() => onToggleDetail(label)} style={{ marginTop: 2 }} />
+              <span>{label}</span>
+            </label>
+            <input
+              style={styles.input}
+              value={detailText[label] || ""}
+              onChange={(e) => onDetailTextChange(label, e.target.value)}
+              placeholder={label === "Others" ? "Specify" : "e.g. area / view / type"}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LabTemplateManager({ labTemplates, persistLabTemplates, onClose, showToast }) {
+  const [editingId, setEditingId] = useState(null);
+  const [showEditor, setShowEditor] = useState(false);
+  const [label, setLabel] = useState("");
+  const [checks, setChecks] = useState({});
+  const [detailChecks, setDetailChecks] = useState({});
+  const [detailText, setDetailText] = useState({});
+
+  function resetEditor() {
+    setLabel(""); setChecks({}); setDetailChecks({}); setDetailText({});
+    setEditingId(null); setShowEditor(false);
+  }
+
+  function startAdd() {
+    resetEditor();
+    setShowEditor(true);
+  }
+
+  function startEdit(tpl) {
+    setLabel(tpl.label);
+    setChecks(Object.fromEntries(tpl.tests.map((t) => [t, true])));
+    setDetailChecks(Object.fromEntries(tpl.details.map((d) => [d.label, true])));
+    setDetailText(Object.fromEntries(tpl.details.map((d) => [d.label, d.detail])));
+    setEditingId(tpl.id);
+    setShowEditor(true);
+  }
+
+  async function saveTemplate() {
+    const tests = LAB_TEST_CHECKLIST.filter((t) => checks[t]);
+    const details = LAB_TEST_WITH_DETAIL.filter((t) => detailChecks[t]).map((t) => ({ label: t, detail: (detailText[t] || "").trim() }));
+    if (!label.trim() || (tests.length === 0 && details.length === 0)) return;
+    const entry = { id: editingId || uid("labtpl"), label: label.trim(), tests, details };
+    const next = editingId ? labTemplates.map((t) => (t.id === editingId ? entry : t)) : [...labTemplates, entry];
+    await persistLabTemplates(next);
+    showToast(editingId ? "Template updated" : "Template saved");
+    resetEditor();
+  }
+
+  async function removeTemplate(id) {
+    await persistLabTemplates(labTemplates.filter((t) => t.id !== id));
+    showToast("Template removed");
+  }
+
+  return (
+    <Modal title="Lab & diagnostic templates" onClose={onClose}>
+      {!showEditor ? (
+        <>
+          <button style={{ ...styles.primaryBtn, justifyContent: "center", width: "100%", marginBottom: 14 }} onClick={startAdd}>
+            <Plus size={15} /> New template
+          </button>
+          {labTemplates.length === 0 ? (
+            <EmptyState text="No templates yet — create one above." />
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {labTemplates.map((tpl) => (
+                <div key={tpl.id} style={styles.patientRow}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, color: "#12312D" }}>{tpl.label}</div>
+                    <div style={{ fontSize: 12, color: "#5B6B68" }}>{tpl.tests.length + tpl.details.length} items</div>
+                  </div>
+                  <button style={styles.iconBtn} onClick={() => startEdit(tpl)} aria-label="Edit"><Pencil size={14} /></button>
+                  <button style={styles.iconBtn} onClick={() => removeTemplate(tpl.id)} aria-label="Remove"><Trash2 size={14} /></button>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <Field label="Template name">
+            <input style={styles.input} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Annual Physical Panel, Pre-Employment" />
+          </Field>
+          <div style={{ marginTop: 10 }}>
+            <LabChecklistFields
+              checks={checks}
+              onToggle={(l) => setChecks((p) => ({ ...p, [l]: !p[l] }))}
+              detailChecks={detailChecks}
+              onToggleDetail={(l) => setDetailChecks((p) => ({ ...p, [l]: !p[l] }))}
+              detailText={detailText}
+              onDetailTextChange={(l, v) => setDetailText((p) => ({ ...p, [l]: v }))}
+              columns={2}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+            <button style={{ ...styles.primaryBtn, justifyContent: "center" }} onClick={saveTemplate}>
+              <Check size={15} /> {editingId ? "Save changes" : "Save template"}
+            </button>
+            <button style={{ ...styles.linkBtn, padding: "9px 14px" }} onClick={resetEditor}>Cancel</button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+function LabRequestSection({ labRequests, onAddLabRequest, patient, clinicInfo, provider, autoOpen, onAutoOpened, labTemplates, persistLabTemplates, showToast }) {
   const [showForm, setShowForm] = useState(false);
   const [checks, setChecks] = useState({});
   const [detailChecks, setDetailChecks] = useState({}); // Xray/Ultrasound/CT-Scan/Others -> bool
   const [detailText, setDetailText] = useState({}); // Xray/Ultrasound/CT-Scan/Others -> free text
   const [printLab, setPrintLab] = useState(null);
+  const [showTemplateManager, setShowTemplateManager] = useState(false);
 
   useEffect(() => {
     if (autoOpen) {
@@ -2416,6 +2565,14 @@ function LabRequestSection({ labRequests, onAddLabRequest, patient, clinicInfo, 
     setDetailChecks({});
     setDetailText({});
     setShowForm(false);
+  }
+
+  // Applying a template adds to whatever's already checked (so two templates can be combined),
+  // rather than clearing the rest of the form.
+  function applyTemplate(tpl) {
+    setChecks((prev) => ({ ...prev, ...Object.fromEntries(tpl.tests.map((t) => [t, true])) }));
+    setDetailChecks((prev) => ({ ...prev, ...Object.fromEntries(tpl.details.map((d) => [d.label, true])) }));
+    setDetailText((prev) => ({ ...prev, ...Object.fromEntries(tpl.details.map((d) => [d.label, d.detail])) }));
   }
 
   function handlePrint(l) {
@@ -2439,34 +2596,53 @@ function LabRequestSection({ labRequests, onAddLabRequest, patient, clinicInfo, 
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 10 }}>
+        <button style={styles.linkBtn} onClick={() => setShowTemplateManager(true)}>
+          <ClipboardList size={13} /> Manage templates
+        </button>
         <button style={styles.primaryBtn} onClick={() => setShowForm((s) => !s)}>
           <Plus size={15} /> New lab &amp; diagnostic request
         </button>
       </div>
+
+      {showTemplateManager && (
+        <LabTemplateManager
+          labTemplates={labTemplates}
+          persistLabTemplates={persistLabTemplates}
+          onClose={() => setShowTemplateManager(false)}
+          showToast={showToast}
+        />
+      )}
 
       {showForm && (
         <div style={styles.card}>
           <div style={{ fontSize: 11.5, color: "#5B6B68", marginBottom: 12 }}>
             Check everything being requested for {patient.name}. Name, address, and age/sex print automatically.
           </div>
-          <CheckGroup items={LAB_TEST_CHECKLIST} checked={checks} onToggle={toggleCheck} columns={3} />
-          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-            {LAB_TEST_WITH_DETAIL.map((label) => (
-              <div key={label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <label style={{ ...styles.checkItem, padding: 0, width: 100, flexShrink: 0 }}>
-                  <input type="checkbox" checked={!!detailChecks[label]} onChange={() => toggleDetail(label)} style={{ marginTop: 2 }} />
-                  <span>{label}</span>
-                </label>
-                <input
-                  style={styles.input}
-                  value={detailText[label] || ""}
-                  onChange={(e) => setDetailText((prev) => ({ ...prev, [label]: e.target.value }))}
-                  placeholder={label === "Others" ? "Specify" : "e.g. area / view / type"}
-                />
+          {labTemplates.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#12312D", marginBottom: 6 }}>Use a template</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {labTemplates.map((tpl) => (
+                  <button key={tpl.id} type="button" style={styles.pillToggle} onClick={() => applyTemplate(tpl)}>
+                    {tpl.label} ({tpl.tests.length + tpl.details.length})
+                  </button>
+                ))}
               </div>
-            ))}
-          </div>
+              <div style={{ fontSize: 11, color: "#8A9793", marginTop: 6 }}>
+                Adds to what's already checked — combine more than one template if needed.
+              </div>
+            </div>
+          )}
+          <LabChecklistFields
+            checks={checks}
+            onToggle={toggleCheck}
+            detailChecks={detailChecks}
+            onToggleDetail={toggleDetail}
+            detailText={detailText}
+            onDetailTextChange={(l, v) => setDetailText((prev) => ({ ...prev, [l]: v }))}
+            columns={3}
+          />
           <button style={{ ...styles.primaryBtn, justifyContent: "center", marginTop: 14 }} onClick={saveRequest}>
             <Check size={15} /> Save request
           </button>
