@@ -475,6 +475,21 @@ function buildRemarks(duration, notes) {
   return base || n;
 }
 
+// Scans chart history (already newest-first) for the most recently recorded value of each
+// vital, independently — so if weight was logged two visits ago but BP just now, both still
+// show up. Falls back to blank per field if nothing's ever been recorded.
+function getLatestVitals(history) {
+  const result = { weight: "", bp: "", heartRate: "", temp: "" };
+  for (const h of history || []) {
+    if (!result.weight && h.weight) result.weight = h.weight;
+    if (!result.bp && h.bp) result.bp = h.bp;
+    if (!result.heartRate && h.heartRate) result.heartRate = h.heartRate;
+    if (!result.temp && h.temp) result.temp = h.temp;
+    if (result.weight && result.bp && result.heartRate && result.temp) break;
+  }
+  return result;
+}
+
 /* ================================================================== */
 
 export default function ClinicEMR() {
@@ -1338,7 +1353,7 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
 
       {tab === "chart" && <ChartTab history={history} onAddNote={addNote} />}
       {tab === "plans" && <PlansTab plans={plans} onAddPlan={addPlan} onOrderLabs={goOrderLabs} />}
-      {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} commonMeds={commonMeds} rxTemplates={rxTemplates} />}
+      {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} commonMeds={commonMeds} rxTemplates={rxTemplates} history={history} />}
       {tab === "forms" && (
         <FormsTab
           certs={certs}
@@ -1389,7 +1404,10 @@ function ActivityLogTab({ auditLog }) {
 function ChartTab({ history, onAddNote }) {
   const [showForm, setShowForm] = useState(false);
   const [note, setNote] = useState("");
-  const [vitals, setVitals] = useState("");
+  const [weight, setWeight] = useState("");
+  const [bp, setBp] = useState("");
+  const [heartRate, setHeartRate] = useState("");
+  const [temp, setTemp] = useState("");
 
   return (
     <div>
@@ -1400,18 +1418,36 @@ function ChartTab({ history, onAddNote }) {
       </div>
       {showForm && (
         <div style={styles.card}>
-          <Field label="Vitals (optional)">
-            <input style={styles.input} value={vitals} onChange={(e) => setVitals(e.target.value)} placeholder="e.g. BP 110/70, HR 78, Temp 36.8°C, Wt 62kg" />
-          </Field>
+          <div style={{ fontSize: 11.5, color: "#5B6B68", marginBottom: 4 }}>Vitals (optional)</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+            <Field label="Weight" style={{ flex: 1, minWidth: 110 }}>
+              <input style={styles.input} value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="e.g. 62 kg" />
+            </Field>
+            <Field label="Blood Pressure" style={{ flex: 1, minWidth: 110 }}>
+              <input style={styles.input} value={bp} onChange={(e) => setBp(e.target.value)} placeholder="e.g. 120/80" />
+            </Field>
+            <Field label="Heart Rate" style={{ flex: 1, minWidth: 110 }}>
+              <input style={styles.input} value={heartRate} onChange={(e) => setHeartRate(e.target.value)} placeholder="e.g. 78 bpm" />
+            </Field>
+            <Field label="Temperature" style={{ flex: 1, minWidth: 110 }}>
+              <input style={styles.input} value={temp} onChange={(e) => setTemp(e.target.value)} placeholder="e.g. 36.8°C" />
+            </Field>
+          </div>
           <Field label="Note">
             <textarea style={{ ...styles.input, minHeight: 80, fontFamily: "inherit" }} value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
           <button
-            style={{ ...styles.primaryBtn, justifyContent: "center" }}
+            style={{ ...styles.primaryBtn, justifyContent: "center", marginTop: 10 }}
             onClick={() => {
               if (!note.trim()) return;
-              onAddNote({ note: note.trim(), vitals: vitals.trim() });
-              setNote(""); setVitals(""); setShowForm(false);
+              onAddNote({
+                note: note.trim(),
+                weight: weight.trim(),
+                bp: bp.trim(),
+                heartRate: heartRate.trim(),
+                temp: temp.trim(),
+              });
+              setNote(""); setWeight(""); setBp(""); setHeartRate(""); setTemp(""); setShowForm(false);
             }}
           >
             <Check size={15} /> Save note
@@ -1423,13 +1459,21 @@ function ChartTab({ history, onAddNote }) {
           <EmptyState text="No chart notes yet." />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {history.map((h) => (
-              <div key={h.id} style={styles.entryCard}>
-                <div style={styles.entryDate}>{fmtDateTime(h.date)}{h.provider ? ` · ${h.provider}` : ""}</div>
-                {h.vitals && <div style={{ ...styles.mono, fontSize: 12, color: "#0F5E56", marginBottom: 4 }}>{h.vitals}</div>}
-                <div style={{ fontSize: 13.5, color: "#2A3B38" }}>{h.note}</div>
-              </div>
-            ))}
+            {history.map((h) => {
+              const vitalsLine = [
+                h.weight ? `Wt ${h.weight}` : "",
+                h.bp ? `BP ${h.bp}` : "",
+                h.heartRate ? `HR ${h.heartRate}` : "",
+                h.temp ? `Temp ${h.temp}` : "",
+              ].filter(Boolean).join(" · ") || h.vitals; // h.vitals covers notes saved before this field split
+              return (
+                <div key={h.id} style={styles.entryCard}>
+                  <div style={styles.entryDate}>{fmtDateTime(h.date)}{h.provider ? ` · ${h.provider}` : ""}</div>
+                  {vitalsLine && <div style={{ ...styles.mono, fontSize: 12, color: "#0F5E56", marginBottom: 4 }}>{vitalsLine}</div>}
+                  <div style={{ fontSize: 13.5, color: "#2A3B38" }}>{h.note}</div>
+                </div>
+              );
+            })}
           </div>
         )}
       </SectionCard>
@@ -1496,7 +1540,7 @@ function PlansTab({ plans, onAddPlan, onOrderLabs }) {
   );
 }
 
-function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds, rxTemplates }) {
+function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds, rxTemplates, history }) {
   const [showForm, setShowForm] = useState(false);
   const [meds, setMeds] = useState([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "" }]);
   const [notes, setNotes] = useState("");
@@ -1675,16 +1719,17 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
       </SectionCard>
 
       <div id="rx-print-area">
-        {printRx && <PrintableRx rx={printRx} patient={patient} clinicInfo={clinicInfo} provider={printRx.provider || provider} />}
+        {printRx && <PrintableRx rx={printRx} patient={patient} clinicInfo={clinicInfo} provider={printRx.provider || provider} vitals={getLatestVitals(history)} />}
       </div>
     </div>
   );
 }
 
 /* ---------------- Printable Rx (matches clinic paper pad) ---------------- */
-function PrintableRx({ rx, patient, clinicInfo, provider }) {
+function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
   const age = calcAge(patient.dob);
   const today = new Date(rx.date || Date.now());
+  const v = vitals || {};
   return (
     <div style={printStyles.page}>
       <div style={printStyles.headerRow}>
@@ -1707,7 +1752,9 @@ function PrintableRx({ rx, patient, clinicInfo, provider }) {
         <div style={printStyles.fieldsCol}>
           <div style={printStyles.fieldLine}><b>Date:</b> {fmtDate(today)}</div>
           <div style={printStyles.fieldLine}><b>Age/Sex:</b> {age !== null ? age : "—"} / {(patient.sex || "").slice(0, 1)}</div>
-          <div style={printStyles.fieldLine}><b>BP:</b> _________ <b>Temp:</b> _____ <b>Weight:</b> _____</div>
+          <div style={printStyles.fieldLine}>
+            <b>BP:</b> {v.bp || "_________"} &nbsp; <b>Temp:</b> {v.temp || "_____"} &nbsp; <b>Weight:</b> {v.weight || "_____"}
+          </div>
         </div>
       </div>
 
