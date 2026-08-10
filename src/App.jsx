@@ -227,10 +227,16 @@ const COMMON_MEDS_PEDS = [
 
 // Used to seed the database the first time the app runs — after that, the
 // database is the source of truth and these are never read again.
-const defaultCommonMeds = () => ({
-  adult: COMMON_MEDS_ADULT,
-  peds: COMMON_MEDS_PEDS,
-});
+const defaultCommonMeds = () => {
+  const merged = [...COMMON_MEDS_ADULT, ...COMMON_MEDS_PEDS];
+  const seen = new Set();
+  return merged.filter((m) => {
+    const key = m.name.trim().toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
 
 // One starter template built from the clinic's own pediatric pneumonia/URTI pad —
 // everything else starts empty; add more from the new "Rx Templates" page in-app.
@@ -385,7 +391,23 @@ async function loadCommonMeds() {
   const { data, error } = await supabase.from("app_state").select("value").eq("key", "common-meds").maybeSingle();
   if (error) { console.error("loadCommonMeds failed", error); return defaultCommonMeds(); }
   if (!data) return defaultCommonMeds();
-  return { adult: data.value.adult || [], peds: data.value.peds || [] };
+  const v = data.value;
+  // Migrate old {adult:[...], peds:[...]} shape (from before the lists were combined)
+  // into a single flat list, so nothing entered earlier gets lost.
+  if (Array.isArray(v)) return v;
+  if (v && (Array.isArray(v.adult) || Array.isArray(v.peds))) {
+    const merged = [...(v.adult || []), ...(v.peds || [])];
+    const seen = new Set();
+    const flat = merged.filter((m) => {
+      const key = (m.name || "").trim().toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    await saveCommonMeds(flat); // persist the migration so it only happens once
+    return flat;
+  }
+  return defaultCommonMeds();
 }
 async function saveCommonMeds(meds) {
   const { error } = await supabase.from("app_state").upsert({ key: "common-meds", value: meds, updated_at: new Date().toISOString() });
@@ -643,13 +665,8 @@ function SignIn() {
     <div style={styles.centerScreen}>
       <style>{globalCss}</style>
       <div style={styles.signInCard}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-          <Stethoscope size={22} color="#0F5E56" />
-          <span style={{ fontFamily: "Fraunces, serif", fontSize: 22, color: "#12312D" }}>
-            Meridian Clinic EMR
-          </span>
-        </div>
-        <p style={{ color: "#5B6B68", fontSize: 13.5, marginTop: 2, marginBottom: 18 }}>
+        <img src="/logo-full.png" alt="Alba-Aniciete Medical Clinic" style={{ width: 180, display: "block", margin: "0 auto 14px" }} />
+        <p style={{ color: "#5B6B68", fontSize: 13.5, marginTop: 2, marginBottom: 18, textAlign: "center" }}>
           Sign in with the email and password your clinic admin set up for you.
         </p>
 
@@ -697,10 +714,11 @@ function CompleteProfile({ onSave }) {
     <div style={styles.centerScreen}>
       <style>{globalCss}</style>
       <div style={styles.signInCard}>
-        <div style={{ fontFamily: "Fraunces, serif", fontSize: 20, color: "#12312D", marginBottom: 6 }}>
+        <img src="/logo-icon.png" alt="" style={{ width: 40, height: 40, display: "block", margin: "0 auto 12px" }} />
+        <div style={{ fontFamily: "Fraunces, serif", fontSize: 20, color: "#12312D", marginBottom: 6, textAlign: "center" }}>
           Welcome — one quick step
         </div>
-        <p style={{ color: "#5B6B68", fontSize: 13.5, marginBottom: 18 }}>
+        <p style={{ color: "#5B6B68", fontSize: 13.5, marginBottom: 18, textAlign: "center" }}>
           This is your first time signing in. How should your name appear on charts and prescriptions?
         </p>
         <div style={styles.label}>Full name</div>
@@ -760,10 +778,10 @@ function Sidebar({ view, setView, currentUser, onSignOut }) {
   ];
   return (
     <aside style={styles.sidebar}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "20px 18px 16px" }}>
-        <Stethoscope size={20} color="#EAF3F1" />
-        <span style={{ fontFamily: "Fraunces, serif", fontSize: 17, color: "#EAF3F1" }}>
-          Meridian
+      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "20px 18px 16px" }}>
+        <img src="/logo-icon.png" alt="" style={{ width: 26, height: 26, flexShrink: 0 }} />
+        <span style={{ fontFamily: "Fraunces, serif", fontSize: 16, color: "#EAF3F1", lineHeight: 1.15 }}>
+          Alba-Aniciete
         </span>
       </div>
       <nav style={{ display: "flex", flexDirection: "column", gap: 2, padding: "0 10px" }}>
@@ -1348,7 +1366,7 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
   const [openSuggestRow, setOpenSuggestRow] = useState(null);
   const [printRx, setPrintRx] = useState(null);
 
-  const medList = isPeds ? commonMeds.peds : commonMeds.adult;
+  const medList = commonMeds;
   const templateList = isPeds ? rxTemplates.peds : rxTemplates.adult;
 
   function applyTemplate(tpl) {
@@ -1412,7 +1430,7 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
             </div>
           )}
           <div style={{ fontSize: 11.5, color: "#5B6B68", marginBottom: 10 }}>
-            Showing common {isPeds ? "pediatric" : "adult"} medications as you type — start typing a medication
+            Showing your clinic's medications as you type — start typing a medication
             name (3+ letters) and pick a match to auto-fill quantity slots and remarks. You can still edit
             anything after picking, or skip suggestions and type your own.
           </div>
@@ -2237,7 +2255,6 @@ function PrintableMedCert({ cert, patient, clinicInfo, provider }) {
 
 /* ---------------- Medications (editable, shared across the clinic) ---------------- */
 function MedicationsPage({ commonMeds, persistCommonMeds, showToast }) {
-  const [tab, setTab] = useState("adult");
   const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editingIndex, setEditingIndex] = useState(null);
@@ -2247,7 +2264,7 @@ function MedicationsPage({ commonMeds, persistCommonMeds, showToast }) {
   const [duration, setDuration] = useState("");
   const [notes, setNotes] = useState("");
 
-  const list = tab === "adult" ? commonMeds.adult : commonMeds.peds;
+  const list = commonMeds;
   const filtered = list.filter((m) => m.name.toLowerCase().includes(query.toLowerCase()));
 
   function resetForm() {
@@ -2271,16 +2288,14 @@ function MedicationsPage({ commonMeds, persistCommonMeds, showToast }) {
     if (!name.trim()) return;
     const entry = { name: name.trim(), dosage: dosage.trim(), frequency: frequency.trim(), duration: duration.trim(), notes: notes.trim() };
     const nextList = editingIndex === null ? [...list, entry] : list.map((m, i) => (i === editingIndex ? entry : m));
-    const next = { ...commonMeds, [tab === "adult" ? "adult" : "peds"]: nextList };
-    await persistCommonMeds(next);
+    await persistCommonMeds(nextList);
     showToast(editingIndex === null ? "Medication added" : "Medication updated");
     resetForm();
   }
 
   async function removeMed(idx) {
     const nextList = list.filter((_, i) => i !== idx);
-    const next = { ...commonMeds, [tab === "adult" ? "adult" : "peds"]: nextList };
-    await persistCommonMeds(next);
+    await persistCommonMeds(nextList);
     showToast("Medication removed");
   }
 
@@ -2290,21 +2305,16 @@ function MedicationsPage({ commonMeds, persistCommonMeds, showToast }) {
         <h2 style={styles.h2}>Medications</h2>
         <button style={styles.primaryBtn} onClick={startAdd}><Plus size={15} /> Add medication</button>
       </div>
-
-      <div style={styles.subNavRow}>
-        <button onClick={() => setTab("adult")} style={{ ...styles.subNavBtn, ...(tab === "adult" ? styles.subNavBtnActive : {}) }}>
-          Adult ({commonMeds.adult.length})
-        </button>
-        <button onClick={() => setTab("peds")} style={{ ...styles.subNavBtn, ...(tab === "peds" ? styles.subNavBtnActive : {}) }}>
-          Pediatric ({commonMeds.peds.length})
-        </button>
+      <div style={{ fontSize: 12.5, color: "#5B6B68", marginBottom: 14 }}>
+        One shared list for every prescription — adult and pediatric medications together. Pick whichever's
+        right for the patient in front of you when writing a prescription.
       </div>
 
       <div style={{ position: "relative", marginBottom: 14 }}>
         <Search size={15} style={{ position: "absolute", left: 12, top: 11, color: "#8A9793" }} />
         <input
           style={{ ...styles.input, paddingLeft: 34 }}
-          placeholder={`Search ${tab === "adult" ? "adult" : "pediatric"} medications…`}
+          placeholder="Search medications…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -2313,8 +2323,7 @@ function MedicationsPage({ commonMeds, persistCommonMeds, showToast }) {
       {showForm && (
         <div style={styles.card}>
           <div style={{ fontSize: 11.5, color: "#5B6B68", marginBottom: 10 }}>
-            This is what shows up as a suggestion when staff type a medication name into a{" "}
-            {tab === "adult" ? "adult" : "pediatric"} patient's prescription.
+            This is what shows up as a suggestion when staff type a medication name into any patient's prescription.
           </div>
           <Field label="Medication name">
             <input style={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Amoxicillin 500mg (Brand)" />
@@ -2342,7 +2351,7 @@ function MedicationsPage({ commonMeds, persistCommonMeds, showToast }) {
         </div>
       )}
 
-      <SectionCard title={`${tab === "adult" ? "Adult" : "Pediatric"} list (${filtered.length})`}>
+      <SectionCard title={`Medication list (${filtered.length})`}>
         {filtered.length === 0 ? (
           <EmptyState text={list.length === 0 ? "No medications yet — add the first one above." : "No matches."} />
         ) : (
@@ -2379,7 +2388,7 @@ function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, showToas
   const [openSuggestRow, setOpenSuggestRow] = useState(null);
 
   const list = tab === "adult" ? rxTemplates.adult : rxTemplates.peds;
-  const medList = tab === "adult" ? commonMeds.adult : commonMeds.peds;
+  const medList = commonMeds;
 
   function resetForm() {
     setLabel("");
