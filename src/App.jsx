@@ -29,6 +29,7 @@ const emptyData = () => ({
   certificates: [],
   physicalExams: [],
   labRequests: [],
+  auditLog: [],
 });
 
 /* ---------------- Common medications (from clinic Rx templates) ---------------- */
@@ -615,6 +616,7 @@ export default function ClinicEMR() {
               data={data}
               persist={persist}
               showToast={showToast}
+              currentUser={currentUser}
               onOpenPatient={(id) => {
                 setSelectedPatientId(id);
                 setView("patientDetail");
@@ -1039,7 +1041,7 @@ function ApptForm({ patients, defaultDate, defaultProvider, onSubmit }) {
 }
 
 /* ---------------- Patients list ---------------- */
-function PatientsList({ data, persist, showToast, onOpenPatient }) {
+function PatientsList({ data, persist, showToast, currentUser, onOpenPatient }) {
   const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
 
@@ -1048,7 +1050,9 @@ function PatientsList({ data, persist, showToast, onOpenPatient }) {
   );
 
   async function addPatient(patient) {
-    const next = { ...data, patients: [...data.patients, { ...patient, id: uid("pt"), history: [] }] };
+    const newId = uid("pt");
+    const auditEntry = { id: uid("audit"), patientId: newId, date: new Date().toISOString(), provider: currentUser.name, action: "patient_created", summary: "Patient record created" };
+    const next = { ...data, patients: [...data.patients, { ...patient, id: newId, history: [] }], auditLog: [...(data.auditLog || []), auditEntry] };
     await persist(next);
     showToast("Patient added");
     setShowForm(false);
@@ -1114,7 +1118,7 @@ function PatientsList({ data, persist, showToast, onOpenPatient }) {
   );
 }
 
-function PatientForm({ onSubmit, initial }) {
+function PatientForm({ onSubmit, initial, submitLabel = "Save patient" }) {
   const [name, setName] = useState(initial?.name || "");
   const [dob, setDob] = useState(initial?.dob || "");
   const [sex, setSex] = useState(initial?.sex || "Female");
@@ -1165,16 +1169,27 @@ function PatientForm({ onSubmit, initial }) {
         style={{ ...styles.primaryBtn, justifyContent: "center", marginTop: 6 }}
         onClick={() => name.trim() && onSubmit({ name: name.trim(), dob, sex, contact, address, guardian, allergies })}
       >
-        <Check size={15} /> Save patient
+        <Check size={15} /> {submitLabel}
       </button>
     </div>
   );
 }
 
 /* ---------------- Patient detail ---------------- */
+const PATIENT_EDITABLE_FIELDS = [
+  { key: "name", label: "Name" },
+  { key: "dob", label: "Date of birth" },
+  { key: "sex", label: "Sex" },
+  { key: "contact", label: "Contact number" },
+  { key: "address", label: "Address" },
+  { key: "guardian", label: "Guardian" },
+  { key: "allergies", label: "Allergies" },
+];
+
 function PatientDetail({ patient, data, persist, currentUser, showToast, clinicInfo, commonMeds, rxTemplates, onBack }) {
   const [tab, setTab] = useState("chart");
   const [formsJumpTo, setFormsJumpTo] = useState(null); // lets "Order Labs" (in Treatment Plans) open Forms straight to the lab request
+  const [showEditPatient, setShowEditPatient] = useState(false);
   const age = calcAge(patient.dob);
   const isPeds = age !== null && age < 18;
 
@@ -1183,6 +1198,7 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
   const certs = (data.certificates || []).filter((c) => c.patientId === patient.id).sort((a, b) => b.date.localeCompare(a.date));
   const exams = (data.physicalExams || []).filter((e) => e.patientId === patient.id).sort((a, b) => b.date.localeCompare(a.date));
   const labRequests = (data.labRequests || []).filter((l) => l.patientId === patient.id).sort((a, b) => b.date.localeCompare(a.date));
+  const auditLog = (data.auditLog || []).filter((a) => a.patientId === patient.id).sort((a, b) => b.date.localeCompare(a.date));
   const history = patient.history || [];
 
   function goOrderLabs() {
@@ -1190,42 +1206,66 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
     setTab("forms");
   }
 
+  // Every add-action writes its normal record AND a matching audit entry, in the same save.
+  function withAudit(dataNext, action, summary) {
+    const entry = { id: uid("audit"), patientId: patient.id, date: new Date().toISOString(), provider: currentUser.name, action, summary };
+    return { ...dataNext, auditLog: [...(data.auditLog || []), entry] };
+  }
+
   async function addNote(note) {
     const patients = data.patients.map((p) =>
-      p.id === patient.id ? { ...p, history: [{ ...note, id: uid("note"), date: new Date().toISOString() }, ...(p.history || [])] } : p
+      p.id === patient.id
+        ? { ...p, history: [{ ...note, id: uid("note"), date: new Date().toISOString(), provider: currentUser.name }, ...(p.history || [])] }
+        : p
     );
-    await persist({ ...data, patients });
+    await persist(withAudit({ ...data, patients }, "chart_note_added", "Added a chart note"));
     showToast("Chart note added");
   }
 
   async function addPlan(plan) {
     const treatmentPlans = [...data.treatmentPlans, { ...plan, id: uid("plan"), patientId: patient.id, date: new Date().toISOString(), provider: currentUser.name }];
-    await persist({ ...data, treatmentPlans });
+    await persist(withAudit({ ...data, treatmentPlans }, "treatment_plan_added", plan.diagnosis ? `Treatment plan: ${plan.diagnosis}` : "Added a treatment plan"));
     showToast("Treatment plan saved");
   }
 
   async function addRx(rxData) {
     const prescriptions = [...data.prescriptions, { ...rxData, id: uid("rx"), patientId: patient.id, date: new Date().toISOString(), provider: currentUser.name }];
-    await persist({ ...data, prescriptions });
+    await persist(withAudit({ ...data, prescriptions }, "prescription_created", `Prescription (${rxData.meds.length} medication${rxData.meds.length === 1 ? "" : "s"})`));
     showToast("Prescription created");
   }
 
   async function addCertificate(certData) {
     const certificates = [...(data.certificates || []), { ...certData, id: uid("cert"), patientId: patient.id, date: new Date().toISOString(), provider: currentUser.name }];
-    await persist({ ...data, certificates });
+    await persist(withAudit({ ...data, certificates }, "certificate_created", "Issued a medical certificate"));
     showToast("Medical certificate created");
   }
 
   async function addExam(examData) {
     const physicalExams = [...(data.physicalExams || []), { ...examData, id: uid("exam"), patientId: patient.id, date: new Date().toISOString(), provider: currentUser.name }];
-    await persist({ ...data, physicalExams });
+    await persist(withAudit({ ...data, physicalExams }, "physical_exam_saved", "Saved a physical exam report"));
     showToast("Physical exam report saved");
   }
 
   async function addLabRequest(labData) {
     const labRequests = [...(data.labRequests || []), { ...labData, id: uid("lab"), patientId: patient.id, date: new Date().toISOString(), provider: currentUser.name }];
-    await persist({ ...data, labRequests });
+    const count = labData.tests.length + labData.details.length;
+    await persist(withAudit({ ...data, labRequests }, "lab_request_created", `Lab/diagnostic request (${count} item${count === 1 ? "" : "s"})`));
     showToast("Lab & diagnostic request saved");
+  }
+
+  async function updatePatientInfo(updated) {
+    const changed = PATIENT_EDITABLE_FIELDS
+      .map(({ key, label }) => ({ key, label, from: patient[key] || "", to: updated[key] || "" }))
+      .filter((c) => c.from !== c.to);
+    if (changed.length === 0) {
+      setShowEditPatient(false);
+      return;
+    }
+    const patients = data.patients.map((p) => (p.id === patient.id ? { ...p, ...updated } : p));
+    const summary = `Updated ${changed.map((c) => c.label).join(", ")}`;
+    await persist(withAudit({ ...data, patients }, "patient_updated", summary));
+    showToast("Patient info updated");
+    setShowEditPatient(false);
   }
 
   return (
@@ -1250,7 +1290,14 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
             <AlertTriangle size={13} /> {patient.allergies}
           </span>
         )}
+        <button style={styles.linkBtn} onClick={() => setShowEditPatient(true)}><Pencil size={13} /> Edit</button>
       </div>
+
+      {showEditPatient && (
+        <Modal title="Edit patient info" onClose={() => setShowEditPatient(false)}>
+          <PatientForm initial={patient} onSubmit={updatePatientInfo} submitLabel="Save changes" />
+        </Modal>
+      )}
 
       <div style={styles.tabRow}>
         {[
@@ -1258,6 +1305,7 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
           { key: "plans", label: "Treatment plans", icon: Stethoscope },
           { key: "rx", label: "Prescriptions", icon: Pill },
           { key: "forms", label: "Forms", icon: ClipboardList },
+          { key: "activity", label: "Activity log", icon: Clock },
         ].map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => setTab(key)} style={{ ...styles.tabBtn, ...(tab === key ? styles.tabBtnActive : {}) }}>
             <Icon size={14} /> {label}
@@ -1283,6 +1331,31 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
           onJumped={() => setFormsJumpTo(null)}
         />
       )}
+      {tab === "activity" && <ActivityLogTab auditLog={auditLog} />}
+    </div>
+  );
+}
+
+function ActivityLogTab({ auditLog }) {
+  return (
+    <div>
+      <div style={{ fontSize: 12.5, color: "#5B6B68", margin: "0 0 14px" }}>
+        A running record of who did what on this chart, and when — added automatically, can't be edited or deleted.
+      </div>
+      <SectionCard title={`Activity (${auditLog.length})`}>
+        {auditLog.length === 0 ? (
+          <EmptyState text="No activity recorded yet." />
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {auditLog.map((a) => (
+              <div key={a.id} style={styles.entryCard}>
+                <div style={styles.entryDate}>{fmtDateTime(a.date)} · {a.provider}</div>
+                <div style={{ fontSize: 13.5, color: "#12312D", marginTop: 4 }}>{a.summary}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
     </div>
   );
 }
@@ -1326,7 +1399,7 @@ function ChartTab({ history, onAddNote }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {history.map((h) => (
               <div key={h.id} style={styles.entryCard}>
-                <div style={styles.entryDate}>{fmtDateTime(h.date)}</div>
+                <div style={styles.entryDate}>{fmtDateTime(h.date)}{h.provider ? ` · ${h.provider}` : ""}</div>
                 {h.vitals && <div style={{ ...styles.mono, fontSize: 12, color: "#0F5E56", marginBottom: 4 }}>{h.vitals}</div>}
                 <div style={{ fontSize: 13.5, color: "#2A3B38" }}>{h.note}</div>
               </div>
