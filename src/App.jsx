@@ -28,6 +28,7 @@ const emptyData = () => ({
   prescriptions: [],
   certificates: [],
   physicalExams: [],
+  labRequests: [],
 });
 
 /* ---------------- Common medications (from clinic Rx templates) ---------------- */
@@ -285,6 +286,18 @@ const FAMILY_HISTORY_CHECKLIST = [
   "Asthma", "Diabetes Mellitus", "Goiter", "Heart Disease", "Hypertension (BP 140/90 and above)",
   "Kidney Disease", "Psychiatric Problem", "Pulmonary Tuberculosis",
 ];
+
+/* ---------------- Laboratory & diagnostic test checklist (from clinic lab request pad) ---------------- */
+const LAB_TEST_CHECKLIST = [
+  "CBC", "Urinalysis", "Fecalysis", "FBS", "HbA1C", "Lipid Profile", "Cholesterol", "Triglycerides",
+  "BUN", "Creatinine", "Uric Acid", "SGPT", "SGOT", "Sodium", "Potassium", "ECG", "2D Echo",
+  "Thyroid Function Test", "TSH", "FT3", "FT4",
+  "Chest Xray", "Sputum GeneXpert", "PPD Test", "Prothrombin Time", "Partial Thromboplastin Time",
+  "Troponin I", "CK-MB", "ESR", "CRP", "ANA", "Pregnancy Test", "Fecal Occult Blood Test",
+  "ABO RH Typing", "HbsAg screening", "VDRL screening", "HIV Screening",
+];
+// These four need a companion blank (e.g. "Xray: chest, lateral view") rather than a plain checkbox.
+const LAB_TEST_WITH_DETAIL = ["Xray", "Ultrasound", "CT-Scan", "Others"];
 
 function uid(prefix) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -1161,6 +1174,7 @@ function PatientForm({ onSubmit, initial }) {
 /* ---------------- Patient detail ---------------- */
 function PatientDetail({ patient, data, persist, currentUser, showToast, clinicInfo, commonMeds, rxTemplates, onBack }) {
   const [tab, setTab] = useState("chart");
+  const [formsJumpTo, setFormsJumpTo] = useState(null); // lets "Order Labs" (in Treatment Plans) open Forms straight to the lab request
   const age = calcAge(patient.dob);
   const isPeds = age !== null && age < 18;
 
@@ -1168,7 +1182,13 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
   const rx = data.prescriptions.filter((r) => r.patientId === patient.id).sort((a, b) => b.date.localeCompare(a.date));
   const certs = (data.certificates || []).filter((c) => c.patientId === patient.id).sort((a, b) => b.date.localeCompare(a.date));
   const exams = (data.physicalExams || []).filter((e) => e.patientId === patient.id).sort((a, b) => b.date.localeCompare(a.date));
+  const labRequests = (data.labRequests || []).filter((l) => l.patientId === patient.id).sort((a, b) => b.date.localeCompare(a.date));
   const history = patient.history || [];
+
+  function goOrderLabs() {
+    setFormsJumpTo("labs");
+    setTab("forms");
+  }
 
   async function addNote(note) {
     const patients = data.patients.map((p) =>
@@ -1200,6 +1220,12 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
     const physicalExams = [...(data.physicalExams || []), { ...examData, id: uid("exam"), patientId: patient.id, date: new Date().toISOString(), provider: currentUser.name }];
     await persist({ ...data, physicalExams });
     showToast("Physical exam report saved");
+  }
+
+  async function addLabRequest(labData) {
+    const labRequests = [...(data.labRequests || []), { ...labData, id: uid("lab"), patientId: patient.id, date: new Date().toISOString(), provider: currentUser.name }];
+    await persist({ ...data, labRequests });
+    showToast("Lab & diagnostic request saved");
   }
 
   return (
@@ -1240,17 +1266,21 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
       </div>
 
       {tab === "chart" && <ChartTab history={history} onAddNote={addNote} />}
-      {tab === "plans" && <PlansTab plans={plans} onAddPlan={addPlan} />}
+      {tab === "plans" && <PlansTab plans={plans} onAddPlan={addPlan} onOrderLabs={goOrderLabs} />}
       {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} commonMeds={commonMeds} rxTemplates={rxTemplates} />}
       {tab === "forms" && (
         <FormsTab
           certs={certs}
           exams={exams}
+          labRequests={labRequests}
           onAddCertificate={addCertificate}
           onAddExam={addExam}
           patient={patient}
           clinicInfo={clinicInfo}
           provider={currentUser.name}
+          onAddLabRequest={addLabRequest}
+          jumpTo={formsJumpTo}
+          onJumped={() => setFormsJumpTo(null)}
         />
       )}
     </div>
@@ -1308,7 +1338,7 @@ function ChartTab({ history, onAddNote }) {
   );
 }
 
-function PlansTab({ plans, onAddPlan }) {
+function PlansTab({ plans, onAddPlan, onOrderLabs }) {
   const [showForm, setShowForm] = useState(false);
   const [diagnosis, setDiagnosis] = useState("");
   const [plan, setPlan] = useState("");
@@ -1316,7 +1346,10 @@ function PlansTab({ plans, onAddPlan }) {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 10 }}>
+        <button style={{ ...styles.primaryBtn, background: "#fff", color: "#0F5E56", border: "1px solid #0F5E56" }} onClick={onOrderLabs}>
+          <ClipboardList size={15} /> Order labs &amp; diagnostics
+        </button>
         <button style={styles.primaryBtn} onClick={() => setShowForm((s) => !s)}>
           <Plus size={15} /> New treatment plan
         </button>
@@ -1624,8 +1657,18 @@ function PrintableRx({ rx, patient, clinicInfo, provider }) {
 }
 
 /* ---------------- Forms (Medical Certificate, etc.) ---------------- */
-function FormsTab({ certs, exams, onAddCertificate, onAddExam, patient, clinicInfo, provider }) {
+function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAddLabRequest, patient, clinicInfo, provider, jumpTo, onJumped }) {
   const [formType, setFormType] = useState("cert");
+  const [autoOpenLabs, setAutoOpenLabs] = useState(false);
+
+  useEffect(() => {
+    if (jumpTo === "labs") {
+      setFormType("labs");
+      setAutoOpenLabs(true);
+      onJumped && onJumped();
+    }
+  }, [jumpTo]);
+
   return (
     <div>
       <div style={styles.subNavRow}>
@@ -1641,12 +1684,29 @@ function FormsTab({ certs, exams, onAddCertificate, onAddExam, patient, clinicIn
         >
           Physical Exam Report
         </button>
+        <button
+          style={{ ...styles.subNavBtn, ...(formType === "labs" ? styles.subNavBtnActive : {}) }}
+          onClick={() => setFormType("labs")}
+        >
+          Lab &amp; Diagnostic Request
+        </button>
       </div>
       {formType === "cert" && (
         <MedCertSection certs={certs} onAddCertificate={onAddCertificate} patient={patient} clinicInfo={clinicInfo} provider={provider} />
       )}
       {formType === "exam" && (
         <PhysicalExamSection exams={exams} onAddExam={onAddExam} patient={patient} clinicInfo={clinicInfo} provider={provider} />
+      )}
+      {formType === "labs" && (
+        <LabRequestSection
+          labRequests={labRequests}
+          onAddLabRequest={onAddLabRequest}
+          patient={patient}
+          clinicInfo={clinicInfo}
+          provider={provider}
+          autoOpen={autoOpenLabs}
+          onAutoOpened={() => setAutoOpenLabs(false)}
+        />
       )}
     </div>
   );
@@ -2256,7 +2316,178 @@ function PrintableMedCert({ cert, patient, clinicInfo, provider }) {
   );
 }
 
-/* ---------------- Staff directory ---------------- */
+/* ---------------- Laboratory & Diagnostic Request section ---------------- */
+function LabRequestSection({ labRequests, onAddLabRequest, patient, clinicInfo, provider, autoOpen, onAutoOpened }) {
+  const [showForm, setShowForm] = useState(false);
+  const [checks, setChecks] = useState({});
+  const [detailChecks, setDetailChecks] = useState({}); // Xray/Ultrasound/CT-Scan/Others -> bool
+  const [detailText, setDetailText] = useState({}); // Xray/Ultrasound/CT-Scan/Others -> free text
+  const [printLab, setPrintLab] = useState(null);
+
+  useEffect(() => {
+    if (autoOpen) {
+      setShowForm(true);
+      onAutoOpened && onAutoOpened();
+    }
+  }, [autoOpen]);
+
+  function toggleCheck(label) {
+    setChecks((prev) => ({ ...prev, [label]: !prev[label] }));
+  }
+  function toggleDetail(label) {
+    setDetailChecks((prev) => ({ ...prev, [label]: !prev[label] }));
+  }
+
+  function resetForm() {
+    setChecks({});
+    setDetailChecks({});
+    setDetailText({});
+    setShowForm(false);
+  }
+
+  function handlePrint(l) {
+    setPrintLab(l);
+    setTimeout(() => window.print(), 60);
+  }
+
+  useEffect(() => {
+    function afterPrint() { setPrintLab(null); }
+    window.addEventListener("afterprint", afterPrint);
+    return () => window.removeEventListener("afterprint", afterPrint);
+  }, []);
+
+  function saveRequest() {
+    const testsChecked = LAB_TEST_CHECKLIST.filter((t) => checks[t]);
+    const detailsChecked = LAB_TEST_WITH_DETAIL.filter((t) => detailChecks[t]).map((t) => ({ label: t, detail: (detailText[t] || "").trim() }));
+    if (testsChecked.length === 0 && detailsChecked.length === 0) return;
+    onAddLabRequest({ tests: testsChecked, details: detailsChecked });
+    resetForm();
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+        <button style={styles.primaryBtn} onClick={() => setShowForm((s) => !s)}>
+          <Plus size={15} /> New lab &amp; diagnostic request
+        </button>
+      </div>
+
+      {showForm && (
+        <div style={styles.card}>
+          <div style={{ fontSize: 11.5, color: "#5B6B68", marginBottom: 12 }}>
+            Check everything being requested for {patient.name}. Name, address, and age/sex print automatically.
+          </div>
+          <CheckGroup items={LAB_TEST_CHECKLIST} checked={checks} onToggle={toggleCheck} columns={3} />
+          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+            {LAB_TEST_WITH_DETAIL.map((label) => (
+              <div key={label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <label style={{ ...styles.checkItem, padding: 0, width: 100, flexShrink: 0 }}>
+                  <input type="checkbox" checked={!!detailChecks[label]} onChange={() => toggleDetail(label)} style={{ marginTop: 2 }} />
+                  <span>{label}</span>
+                </label>
+                <input
+                  style={styles.input}
+                  value={detailText[label] || ""}
+                  onChange={(e) => setDetailText((prev) => ({ ...prev, [label]: e.target.value }))}
+                  placeholder={label === "Others" ? "Specify" : "e.g. area / view / type"}
+                />
+              </div>
+            ))}
+          </div>
+          <button style={{ ...styles.primaryBtn, justifyContent: "center", marginTop: 14 }} onClick={saveRequest}>
+            <Check size={15} /> Save request
+          </button>
+        </div>
+      )}
+
+      <SectionCard title="Lab & diagnostic requests on file">
+        {labRequests.length === 0 ? (
+          <EmptyState text="No lab or diagnostic requests yet." />
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {labRequests.map((l) => (
+              <div key={l.id} style={styles.entryCard}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div style={styles.entryDate}>{fmtDateTime(l.date)} · {l.provider}</div>
+                  <button style={styles.linkBtn} onClick={() => handlePrint(l)}>
+                    <FileText size={13} /> Print
+                  </button>
+                </div>
+                <div style={{ fontSize: 13, color: "#12312D", marginTop: 4 }}>
+                  {[...l.tests, ...l.details.map((d) => (d.detail ? `${d.label}: ${d.detail}` : d.label))].join(", ")}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
+
+      <div id="lab-print-area">
+        {printLab && <PrintableLabRequest lab={printLab} patient={patient} clinicInfo={clinicInfo} provider={printLab.provider || provider} />}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Printable Lab & Diagnostic Request (matches clinic template) ---------------- */
+function PrintableLabRequest({ lab, patient, clinicInfo, provider }) {
+  const age = calcAge(patient.dob);
+  const issueDate = new Date(lab.date || Date.now());
+  const checkedSet = new Set(lab.tests);
+  const detailMap = Object.fromEntries((lab.details || []).map((d) => [d.label, d.detail]));
+  const half = Math.ceil(LAB_TEST_CHECKLIST.length / 2);
+  const colA = LAB_TEST_CHECKLIST.slice(0, half);
+  const colB = LAB_TEST_CHECKLIST.slice(half);
+
+  return (
+    <div style={printStyles.page}>
+      <div style={printStyles.headerRow}>
+        <div style={printStyles.logoCircle}>
+          <Stethoscope size={26} color="#0F5E56" />
+        </div>
+        <div>
+          <div style={printStyles.clinicName}>{clinicInfo.name}</div>
+          <div style={printStyles.clinicSub}>{clinicInfo.address}</div>
+          <div style={printStyles.clinicSub}>Contact number {clinicInfo.phone}</div>
+        </div>
+      </div>
+
+      <div style={{ ...printStyles.certTitle, letterSpacing: 2 }}>LABORATORY AND DIAGNOSTIC REQUEST</div>
+
+      <div style={{ fontSize: 12.5, marginTop: 16 }}>
+        Name: <Blank minWidth={320}>{patient.name}</Blank> &nbsp;&nbsp; Date: <Blank minWidth={110}>{fmtDate(issueDate)}</Blank>
+      </div>
+      <div style={{ fontSize: 12.5, marginTop: 10 }}>
+        Address: <Blank minWidth={320}>{patient.address || ""}</Blank> &nbsp;&nbsp; Age/Sex: <Blank minWidth={90}>{age !== null ? `${age}` : ""}{age !== null && patient.sex ? " / " : ""}{(patient.sex || "").slice(0, 1)}</Blank>
+      </div>
+
+      <div style={{ display: "flex", gap: 30, marginTop: 20 }}>
+        {[colA, colB].map((col, ci) => (
+          <div key={ci} style={{ flex: 1, fontSize: 12.5, lineHeight: 1.9 }}>
+            {col.map((t) => (
+              <div key={t}>{checkedSet.has(t) ? "☑" : "☐"} {t}</div>
+            ))}
+            {ci === 1 && LAB_TEST_WITH_DETAIL.map((label) => (
+              <div key={label}>
+                {detailChecked(detailMap, label) ? "☑" : "☐"} {label}: <Blank minWidth={110}>{detailMap[label] || ""}</Blank>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 44 }}>
+        <div style={printStyles.signatureBlock}>
+          <div style={printStyles.signatureLine}>{provider}, MD</div>
+          <div style={{ fontSize: 11 }}>License No. _____________</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+function detailChecked(detailMap, label) {
+  return Object.prototype.hasOwnProperty.call(detailMap, label);
+}
 
 /* ---------------- Medications (editable, shared across the clinic) ---------------- */
 function MedicationsPage({ commonMeds, persistCommonMeds, showToast }) {
@@ -2711,11 +2942,11 @@ const globalCss = `
   input:focus, select:focus, textarea:focus, button:focus-visible {
     outline: 2px solid #0F5E56; outline-offset: 1px;
   }
-  #rx-print-area, #cert-print-area, #exam-print-area { display: none; }
+  #rx-print-area, #cert-print-area, #exam-print-area, #lab-print-area { display: none; }
   @media print {
     body * { visibility: hidden; }
-    #rx-print-area, #rx-print-area *, #cert-print-area, #cert-print-area *, #exam-print-area, #exam-print-area * { visibility: visible; }
-    #rx-print-area, #cert-print-area, #exam-print-area { display: block; position: absolute; top: 0; left: 0; width: 100%; }
+    #rx-print-area, #rx-print-area *, #cert-print-area, #cert-print-area *, #exam-print-area, #exam-print-area *, #lab-print-area, #lab-print-area * { visibility: visible; }
+    #rx-print-area, #cert-print-area, #exam-print-area, #lab-print-area { display: block; position: absolute; top: 0; left: 0; width: 100%; }
     @page { margin: 10mm; }
   }
 `;
