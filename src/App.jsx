@@ -478,6 +478,41 @@ function buildRemarks(duration, notes) {
 // Scans chart history (already newest-first) for the most recently recorded value of each
 // vital, independently — so if weight was logged two visits ago but BP just now, both still
 // show up. Falls back to blank per field if nothing's ever been recorded.
+// Weight-based dosing rules — matched against a medication's name. Each rule gives a total
+// daily dose per kg, split across a number of even doses per day. Add more entries here to
+// extend this to other medications later; not limited to Co-Amoxiclav.
+const WEIGHT_DOSING_RULES = [
+  {
+    match: (name) => /co-amoxiclav/i.test(name) && /mg\s*\/\s*5\s*mL/i.test(name),
+    mgPerKgPerDay: 30,
+    dosesPerDay: 3,
+    label: "30 mg/kg/day ÷ 3 doses (every 8 hours)",
+  },
+];
+
+function getWeightDosingRule(medName) {
+  if (!medName) return null;
+  return WEIGHT_DOSING_RULES.find((r) => r.match(medName)) || null;
+}
+
+// Reads the concentration straight from the medication name (e.g. "312.5mg/5mL") so the
+// suggestion always matches whichever strength is actually selected.
+function computeWeightDose(medName, weightKg, rule) {
+  const concMatch = medName.match(/(\d+(?:\.\d+)?)\s*mg\s*\/\s*5\s*mL/i);
+  if (!concMatch || !weightKg || weightKg <= 0) return null;
+  const mgPer5ml = parseFloat(concMatch[1]);
+  const mgPerMl = mgPer5ml / 5;
+  const totalDailyMg = rule.mgPerKgPerDay * weightKg;
+  const perDoseMg = totalDailyMg / rule.dosesPerDay;
+  const perDoseMl = perDoseMg / mgPerMl;
+  return {
+    mgPer5ml,
+    totalDailyMg: Math.round(totalDailyMg * 10) / 10,
+    perDoseMg: Math.round(perDoseMg * 10) / 10,
+    perDoseMl: Math.round(perDoseMl * 10) / 10,
+  };
+}
+
 function getLatestVitals(history) {
   const result = { weight: "", bp: "", heartRate: "", temp: "" };
   for (const h of history || []) {
@@ -1664,9 +1699,15 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
 
   const medList = commonMeds;
   const templateList = rxTemplates;
+  const patientWeightKg = parseFloat(getLatestVitals(history).weight) || null;
 
   function applyTemplate(tpl) {
     setMeds(tpl.meds.map((m) => ({ ...m })));
+  }
+
+  function applyWeightDose(i, perDoseMl) {
+    const mlStr = `${perDoseMl}mL`;
+    setMeds((m) => m.map((row, idx) => (idx === i ? { ...row, am: mlStr, nn: mlStr, pm: mlStr } : row)));
   }
 
   function updateMed(i, field, val) {
@@ -1744,6 +1785,8 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
               q.length >= 3
                 ? medList.filter((m) => m.name.toLowerCase().includes(q)).slice(0, 6)
                 : [];
+            const doseRule = getWeightDosingRule(row.name);
+            const doseCalc = doseRule ? computeWeightDose(row.name, patientWeightKg, doseRule) : null;
             return (
               <div key={i} style={{ marginBottom: 8 }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
@@ -1794,6 +1837,28 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
                   onChange={(e) => updateMed(i, "indication", e.target.value)}
                   placeholder="Indication (optional) — e.g. Antibiotics, for cough, for fever"
                 />
+                {doseRule && (
+                  <div style={styles.doseHint}>
+                    {doseCalc ? (
+                      <>
+                        <b>Weight-based dose suggestion:</b> {doseRule.label} × {patientWeightKg}kg
+                        {" "}= {doseCalc.totalDailyMg}mg/day ({doseCalc.mgPer5ml}mg/5mL formulation)
+                        {" "}→ <b>{doseCalc.perDoseMl}mL per dose</b>
+                        <button type="button" style={styles.doseHintBtn} onClick={() => applyWeightDose(i, doseCalc.perDoseMl)}>
+                          Use for AM/NN/PM
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <b>Weight-based dosing available</b> ({doseRule.label}) — add this patient's weight
+                        in a chart note first to get an mL suggestion.
+                      </>
+                    )}
+                    <div style={{ fontSize: 10.5, color: "#8A9793", marginTop: 3 }}>
+                      Calculated, not a substitute for clinical judgment — please verify before prescribing.
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -3133,6 +3198,7 @@ function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, showToas
           {meds.map((row, i) => {
             const q = row.name.trim().toLowerCase();
             const suggestions = q.length >= 3 ? medList.filter((m) => m.name.toLowerCase().includes(q)).slice(0, 6) : [];
+            const doseRule = getWeightDosingRule(row.name);
             return (
               <div key={i} style={{ marginBottom: 8 }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
@@ -3174,6 +3240,13 @@ function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, showToas
                   onChange={(e) => updateMed(i, "indication", e.target.value)}
                   placeholder="Indication (optional) — e.g. Antibiotics, for cough, for fever"
                 />
+                {doseRule && (
+                  <div style={styles.doseHint}>
+                    <b>Weight-based dosing available</b> ({doseRule.label}) — a specific mL amount
+                    will be suggested automatically when this template is used on a patient with a
+                    recorded weight.
+                  </div>
+                )}
               </div>
             );
           })}
@@ -3370,6 +3443,8 @@ const styles = {
   pillToggle: { background: "#fff", border: "1px solid #DCE3E1", color: "#5B6B68", borderRadius: 20, padding: "6px 13px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" },
   pillToggleActive: { background: "#0F5E56", borderColor: "#0F5E56", color: "#fff" },
   checkItem: { display: "flex", gap: 6, alignItems: "flex-start", fontSize: 12.5, color: "#2A3B38", padding: "3px 0", breakInside: "avoid" },
+  doseHint: { marginTop: 6, padding: "8px 10px", background: "#EAF3F1", border: "1px solid #CFE3DF", borderRadius: 8, fontSize: 12, color: "#12312D", lineHeight: 1.5 },
+  doseHintBtn: { marginLeft: 8, background: "#0F5E56", color: "#fff", border: "none", borderRadius: 6, padding: "3px 9px", fontSize: 11.5, fontWeight: 600, cursor: "pointer" },
 };
 
 const globalCss = `
