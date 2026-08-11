@@ -1542,7 +1542,7 @@ function PlansTab({ plans, onAddPlan, onOrderLabs }) {
 
 function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds, rxTemplates, history }) {
   const [showForm, setShowForm] = useState(false);
-  const [meds, setMeds] = useState([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "" }]);
+  const [meds, setMeds] = useState([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "", indication: "" }]);
   const [notes, setNotes] = useState("");
   const [openSuggestRow, setOpenSuggestRow] = useState(null);
   const [printRx, setPrintRx] = useState(null);
@@ -1558,7 +1558,7 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
     setMeds((m) => m.map((row, idx) => (idx === i ? { ...row, [field]: val } : row)));
   }
   function addMedRow() {
-    setMeds((m) => [...m, { name: "", qty: "", am: "", nn: "", pm: "", remarks: "" }]);
+    setMeds((m) => [...m, { name: "", qty: "", am: "", nn: "", pm: "", remarks: "", indication: "" }]);
   }
   function removeMedRow(i) {
     setMeds((m) => m.filter((_, idx) => idx !== i));
@@ -1671,6 +1671,12 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
                     <button style={styles.iconBtn} onClick={() => removeMedRow(i)} aria-label="Remove"><Trash2 size={14} /></button>
                   )}
                 </div>
+                <input
+                  style={{ ...styles.input, marginTop: 6, fontSize: 12.5 }}
+                  value={row.indication}
+                  onChange={(e) => updateMed(i, "indication", e.target.value)}
+                  placeholder="Indication (optional) — e.g. Antibiotics, for cough, for fever"
+                />
               </div>
             );
           })}
@@ -1684,7 +1690,7 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
               const validMeds = meds.filter((m) => m.name.trim());
               if (validMeds.length === 0) return;
               onAddRx({ meds: validMeds, notes: notes.trim() });
-              setMeds([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "" }]); setNotes(""); setShowForm(false);
+              setMeds([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "", indication: "" }]); setNotes(""); setShowForm(false);
             }}
           >
             <Check size={15} /> Save prescription
@@ -1707,7 +1713,7 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
                 <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
                   {r.meds.map((m, idx) => (
                     <div key={idx} style={{ ...styles.mono, fontSize: 12.5, color: "#12312D" }}>
-                      {m.qty ? `[${m.qty}] ` : ""}{m.name} — AM {m.am || "0"} · NN {m.nn || "0"} · PM {m.pm || "0"}{m.remarks ? ` — ${m.remarks}` : ""}
+                      {m.qty ? `[${m.qty}] ` : ""}{m.name}{m.indication ? ` (${m.indication})` : ""} — AM {m.am || "0"} · NN {m.nn || "0"} · PM {m.pm || "0"}{m.remarks ? ` — ${m.remarks}` : ""}
                     </div>
                   ))}
                 </div>
@@ -1775,7 +1781,10 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
           {rx.meds.map((m, i) => (
             <tr key={i}>
               <td style={printStyles.tdCenter}>{m.qty || ""}</td>
-              <td style={printStyles.td}>{m.name}</td>
+              <td style={printStyles.td}>
+                {m.name}
+                {m.indication && <div style={{ fontSize: 11, marginTop: 2 }}>({m.indication})</div>}
+              </td>
               <td style={printStyles.tdCenter}>{m.am || ""}</td>
               <td style={printStyles.tdCenter}>{m.nn || ""}</td>
               <td style={printStyles.tdCenter}>{m.pm || ""}</td>
@@ -2915,7 +2924,7 @@ function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, showToas
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [label, setLabel] = useState("");
-  const [meds, setMeds] = useState([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "" }]);
+  const [meds, setMeds] = useState([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "", indication: "" }]);
   const [openSuggestRow, setOpenSuggestRow] = useState(null);
 
   const list = rxTemplates;
@@ -2923,7 +2932,7 @@ function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, showToas
 
   function resetForm() {
     setLabel("");
-    setMeds([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "" }]);
+    setMeds([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "", indication: "" }]);
     setEditingId(null);
     setShowForm(false);
   }
@@ -2944,7 +2953,7 @@ function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, showToas
     setMeds((m) => m.map((row, idx) => (idx === i ? { ...row, [field]: val } : row)));
   }
   function addMedRow() {
-    setMeds((m) => [...m, { name: "", qty: "", am: "", nn: "", pm: "", remarks: "" }]);
+    setMeds((m) => [...m, { name: "", qty: "", am: "", nn: "", pm: "", remarks: "", indication: "" }]);
   }
   function removeMedRow(i) {
     setMeds((m) => m.filter((_, idx) => idx !== i));
@@ -3034,6 +3043,12 @@ function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, showToas
                     <button style={styles.iconBtn} onClick={() => removeMedRow(i)} aria-label="Remove"><Trash2 size={14} /></button>
                   )}
                 </div>
+                <input
+                  style={{ ...styles.input, marginTop: 6, fontSize: 12.5 }}
+                  value={row.indication}
+                  onChange={(e) => updateMed(i, "indication", e.target.value)}
+                  placeholder="Indication (optional) — e.g. Antibiotics, for cough, for fever"
+                />
               </div>
             );
           })}
