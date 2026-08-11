@@ -550,6 +550,37 @@ function computeWeightDose(medName, weightKg, rule) {
   };
 }
 
+// Formats the most recently recorded vitals into one line, used to pre-fill the Objective
+// field when starting a new treatment plan.
+function formatVitalsForObjective(vitals) {
+  if (!vitals) return "";
+  const parts = [
+    vitals.weight ? `Weight: ${vitals.weight}` : "",
+    vitals.bp ? `BP: ${vitals.bp}` : "",
+    vitals.heartRate ? `HR: ${vitals.heartRate}` : "",
+    vitals.temp ? `Temp: ${vitals.temp}` : "",
+  ].filter(Boolean);
+  return parts.join(", ");
+}
+
+// Lists the medications from the most recent prescription, used to pre-fill the Plan field
+// when starting a new treatment plan.
+function formatRxForPlan(rxList) {
+  if (!rxList || rxList.length === 0) return "";
+  const latest = rxList[0]; // already sorted newest-first
+  if (!latest.meds || latest.meds.length === 0) return "";
+  return latest.meds
+    .map((m) => {
+      const dosing = [m.am, m.nn, m.pm].some(Boolean) ? `AM ${m.am || "0"} · NN ${m.nn || "0"} · PM ${m.pm || "0"}` : "";
+      return [
+        m.name + (m.indication ? ` (${m.indication})` : ""),
+        dosing,
+        m.remarks || "",
+      ].filter(Boolean).join(" — ");
+    })
+    .join("\n");
+}
+
 // Joins every chart note (newest first, same order as the Chart tab) into one block of text,
 // used to pre-fill the Subjective field when starting a new treatment plan.
 function formatChartNotesForSubjective(history) {
@@ -1507,7 +1538,7 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
       </div>
 
       {tab === "chart" && <ChartTab history={history} onAddNote={addNote} onEditNote={editNote} />}
-      {tab === "plans" && <PlansTab plans={plans} onAddPlan={addPlan} onEditPlan={editPlan} onOrderLabs={goOrderLabs} history={history} />}
+      {tab === "plans" && <PlansTab plans={plans} onAddPlan={addPlan} onEditPlan={editPlan} onOrderLabs={goOrderLabs} history={history} rx={rx} />}
       {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} commonMeds={commonMeds} rxTemplates={rxTemplates} history={history} dosingRules={dosingRules} />}
       {tab === "forms" && (
         <FormsTab
@@ -1664,7 +1695,7 @@ function ChartTab({ history, onAddNote, onEditNote }) {
   );
 }
 
-function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs, history }) {
+function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs, history, rx }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [subjective, setSubjective] = useState("");
@@ -1680,9 +1711,9 @@ function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs, history }) {
 
   function startAdd() {
     setSubjective(formatChartNotesForSubjective(history));
-    setObjective("");
+    setObjective(formatVitalsForObjective(getLatestVitals(history)));
     setAssessment("");
-    setPlan("");
+    setPlan(formatRxForPlan(rx));
     setFollowUp("");
     setEditingId(null);
     setShowForm(true);
@@ -1738,12 +1769,22 @@ function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs, history }) {
           <Field label="O · Objective">
             <textarea style={{ ...styles.input, minHeight: 70, fontFamily: "inherit" }} value={objective} onChange={(e) => setObjective(e.target.value)} placeholder="Measurable findings — vitals, exam findings, results" />
           </Field>
+          {objective && objective === formatVitalsForObjective(getLatestVitals(history)) && (
+            <div style={{ fontSize: 11, color: "#8A9793", marginTop: -6, marginBottom: 10 }}>
+              Filled in from this patient's most recent recorded vitals — edit or trim freely.
+            </div>
+          )}
           <Field label="A · Assessment">
             <textarea style={{ ...styles.input, minHeight: 60, fontFamily: "inherit" }} value={assessment} onChange={(e) => setAssessment(e.target.value)} placeholder="Diagnosis or clinical impression" />
           </Field>
           <Field label="P · Plan">
             <textarea style={{ ...styles.input, minHeight: 90, fontFamily: "inherit" }} value={plan} onChange={(e) => setPlan(e.target.value)} placeholder="Interventions, goals, patient education, referrals…" />
           </Field>
+          {plan && plan === formatRxForPlan(rx) && (
+            <div style={{ fontSize: 11, color: "#8A9793", marginTop: -6, marginBottom: 10 }}>
+              Filled in from the most recent prescription — add anything else and edit freely.
+            </div>
+          )}
           <Field label="Follow-up">
             <input style={styles.input} value={followUp} onChange={(e) => setFollowUp(e.target.value)} placeholder="e.g. Recheck in 2 weeks" />
           </Field>
