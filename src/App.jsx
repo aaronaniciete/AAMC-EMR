@@ -1977,74 +1977,74 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
   const today = new Date(rx.date || Date.now());
   const v = vitals || {};
   return (
-    <div style={printStyles.page}>
-      <div style={printStyles.headerRow}>
-        <div style={printStyles.logoCircle}>
-          <Stethoscope size={26} color="#0F5E56" />
+    <div style={printStylesRx.page}>
+      <div style={printStylesRx.headerRow}>
+        <div style={printStylesRx.logoCircle}>
+          <Stethoscope size={11} color="#0F5E56" />
         </div>
         <div>
-          <div style={printStyles.clinicName}>{clinicInfo.name}</div>
-          <div style={printStyles.clinicSub}>{clinicInfo.address}</div>
-          <div style={printStyles.clinicSub}>{clinicInfo.phone}</div>
+          <div style={printStylesRx.clinicName}>{clinicInfo.name}</div>
+          <div style={printStylesRx.clinicSub}>{clinicInfo.address}</div>
+          <div style={printStylesRx.clinicSub}>{clinicInfo.phone}</div>
         </div>
       </div>
 
-      <div style={printStyles.fieldsRow}>
-        <div style={printStyles.fieldsCol}>
-          <div style={printStyles.fieldLine}><b>Name:</b> {patient.name}</div>
-          <div style={printStyles.fieldLine}><b>Address:</b> {patient.address || ""}</div>
-          <div style={printStyles.fieldLine}><b>Contact No:</b> {patient.contact || ""}</div>
+      <div style={printStylesRx.fieldsRow}>
+        <div style={printStylesRx.fieldsCol}>
+          <div style={printStylesRx.fieldLine}><b>Name:</b> {patient.name}</div>
+          <div style={printStylesRx.fieldLine}><b>Address:</b> {patient.address || ""}</div>
+          <div style={printStylesRx.fieldLine}><b>Contact No:</b> {patient.contact || ""}</div>
         </div>
-        <div style={printStyles.fieldsCol}>
-          <div style={printStyles.fieldLine}><b>Date:</b> {fmtDate(today)}</div>
-          <div style={printStyles.fieldLine}><b>Age/Sex:</b> {age !== null ? age : "—"} / {(patient.sex || "").slice(0, 1)}</div>
-          <div style={printStyles.fieldLine}>
-            <b>BP:</b> {v.bp || "_________"} &nbsp; <b>Temp:</b> {v.temp || "_____"} &nbsp; <b>Weight:</b> {v.weight || "_____"}
+        <div style={printStylesRx.fieldsCol}>
+          <div style={printStylesRx.fieldLine}><b>Date:</b> {fmtDate(today)}</div>
+          <div style={printStylesRx.fieldLine}><b>Age/Sex:</b> {age !== null ? age : "—"} / {(patient.sex || "").slice(0, 1)}</div>
+          <div style={printStylesRx.fieldLine}>
+            <b>BP:</b> {v.bp || "____"} &nbsp; <b>Temp:</b> {v.temp || "___"} &nbsp; <b>Wt:</b> {v.weight || "___"}
           </div>
         </div>
       </div>
 
-      <div style={printStyles.rxMark}>R<span style={{ fontSize: "0.6em" }}>x</span></div>
+      <div style={printStylesRx.rxMark}>R<span style={{ fontSize: "0.6em" }}>x</span></div>
 
-      <table style={printStyles.table}>
+      <table style={printStylesRx.table}>
         <thead>
           <tr>
-            <th style={{ ...printStyles.th, width: 34 }}>No</th>
-            <th style={printStyles.th}>Medications and Dosage</th>
-            <th style={{ ...printStyles.th, width: 34 }}>AM</th>
-            <th style={{ ...printStyles.th, width: 34 }}>NN</th>
-            <th style={{ ...printStyles.th, width: 34 }}>PM</th>
-            <th style={{ ...printStyles.th, width: 150 }}>Remarks</th>
+            <th style={{ ...printStylesRx.th, width: 14 }}>No</th>
+            <th style={printStylesRx.th}>Medications and Dosage</th>
+            <th style={{ ...printStylesRx.th, width: 14 }}>AM</th>
+            <th style={{ ...printStylesRx.th, width: 14 }}>NN</th>
+            <th style={{ ...printStylesRx.th, width: 14 }}>PM</th>
+            <th style={{ ...printStylesRx.th, width: 55 }}>Remarks</th>
           </tr>
         </thead>
         <tbody>
           {rx.meds.map((m, i) => (
             <tr key={i}>
-              <td style={printStyles.tdCenter}>{m.qty || ""}</td>
-              <td style={printStyles.td}>
+              <td style={printStylesRx.tdCenter}>{m.qty || ""}</td>
+              <td style={printStylesRx.td}>
                 {m.name}
-                {m.indication && <div style={{ fontSize: 11, marginTop: 2 }}>({m.indication})</div>}
+                {m.indication && <div style={{ fontSize: 6, marginTop: 1 }}>({m.indication})</div>}
               </td>
-              <td style={printStyles.tdCenter}>{m.am || ""}</td>
-              <td style={printStyles.tdCenter}>{m.nn || ""}</td>
-              <td style={printStyles.tdCenter}>{m.pm || ""}</td>
-              <td style={printStyles.td}>{m.remarks || ""}</td>
+              <td style={printStylesRx.tdCenter}>{m.am || ""}</td>
+              <td style={printStylesRx.tdCenter}>{m.nn || ""}</td>
+              <td style={printStylesRx.tdCenter}>{m.pm || ""}</td>
+              <td style={printStylesRx.td}>{m.remarks || ""}</td>
             </tr>
           ))}
         </tbody>
       </table>
 
       {rx.notes && (
-        <div style={{ fontSize: 12, marginTop: 10 }}>
+        <div style={{ fontSize: 6.5, marginTop: 5 }}>
           <b>Notes:</b> {rx.notes}
         </div>
       )}
 
-      <div style={printStyles.footerRow}>
-        <div style={printStyles.followUp}>Follow-up: _________________, {today.getFullYear()}</div>
-        <div style={printStyles.signatureBlock}>
-          <div style={printStyles.signatureLine}>{provider}</div>
-          <div style={{ fontSize: 11 }}>Medical Doctor</div>
+      <div style={printStylesRx.footerRow}>
+        <div style={printStylesRx.followUp}>Follow-up: ________, {today.getFullYear()}</div>
+        <div style={printStylesRx.signatureBlock}>
+          <div style={printStylesRx.signatureLine}>{provider}</div>
+          <div style={{ fontSize: 6 }}>Medical Doctor</div>
         </div>
       </div>
     </div>
@@ -3622,6 +3622,9 @@ const globalCss = `
     #rx-print-area, #rx-print-area *, #cert-print-area, #cert-print-area *, #exam-print-area, #exam-print-area *, #lab-print-area, #lab-print-area * { visibility: visible; }
     #rx-print-area, #cert-print-area, #exam-print-area, #lab-print-area { display: block; position: absolute; top: 0; left: 0; width: 100%; }
     @page { margin: 10mm; }
+    /* Prescription prints at quarter-A4 (A6, 105mm x 148.5mm) — everything else stays full A4. */
+    @page rx-quarter { size: 105mm 148.5mm; margin: 4mm; }
+    #rx-print-area { page: rx-quarter; }
   }
 `;
 
@@ -3651,4 +3654,26 @@ const printStyles = {
   captionLabel: { fontSize: 10, color: "#555", textAlign: "center", marginTop: 2 },
   checkGrid: { columns: 3, WebkitColumns: 3, columnGap: 20, fontSize: 11.5, marginTop: 4 },
   checkLine: { breakInside: "avoid", padding: "2px 0" },
+};
+
+// Scaled-down version of printStyles, used only for the prescription — it prints at quarter-A4
+// (A6), so everything here is sized to actually fit that much smaller sheet legibly.
+const printStylesRx = {
+  page: { fontFamily: "Arial, Helvetica, sans-serif", color: "#111", padding: "3mm", maxWidth: "97mm" },
+  headerRow: { display: "flex", alignItems: "center", gap: 5, borderBottom: "1.5px solid #0F5E56", paddingBottom: 3, marginBottom: 4 },
+  logoCircle: { width: 20, height: 20, borderRadius: "50%", border: "1.2px solid #0F5E56", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  clinicName: { fontSize: 9.5, fontWeight: 800, color: "#0F5E56", letterSpacing: 0.1, lineHeight: 1.15 },
+  clinicSub: { fontSize: 6.5, color: "#333", lineHeight: 1.2 },
+  fieldsRow: { display: "flex", gap: 8, marginBottom: 5 },
+  fieldsCol: { flex: 1, display: "flex", flexDirection: "column", gap: 2 },
+  fieldLine: { fontSize: 7, borderBottom: "1px solid #999", paddingBottom: 1 },
+  rxMark: { fontSize: 15, fontWeight: 800, color: "#555", margin: "3px 0 5px" },
+  table: { width: "100%", borderCollapse: "collapse", fontSize: 6.8 },
+  th: { border: "1px solid #333", padding: "1.5px 2px", background: "#F1F4F3", textAlign: "left", fontSize: 6.3 },
+  td: { border: "1px solid #333", padding: "2px 2px", verticalAlign: "top" },
+  tdCenter: { border: "1px solid #333", padding: "2px 2px", textAlign: "center", verticalAlign: "top" },
+  footerRow: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: 10 },
+  followUp: { fontSize: 7 },
+  signatureBlock: { textAlign: "center", minWidth: 70 },
+  signatureLine: { borderTop: "1px solid #333", paddingTop: 2, fontSize: 7, fontWeight: 600 },
 };
