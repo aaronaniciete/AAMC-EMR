@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import {
   CalendarDays, Users, Stethoscope, Pill, Home, Search, Plus, X,
   Baby, UserRound, AlertTriangle, ChevronLeft, Clock, FileText,
-  ShieldAlert, LogOut, Trash2, Check, ClipboardList, Pencil, Layers, Lock
+  ShieldAlert, LogOut, Trash2, Check, ClipboardList, Pencil, Layers, Lock, Inbox
 } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
 
@@ -466,6 +466,41 @@ async function saveDosingRules(rules) {
   if (error) console.error("saveDosingRules failed", error);
 }
 
+// Online booking requests from the public website — stored in their own table (not app_state)
+// since the public site needs to INSERT into it without ever being able to read other patients'
+// data back. See schema-booking.sql.
+async function loadPendingRegistrations() {
+  const { data, error } = await supabase
+    .from("patient_registrations")
+    .select("*")
+    .eq("status", "pending")
+    .order("appointment_date", { ascending: true })
+    .order("appointment_time", { ascending: true });
+  if (error) { console.error("loadPendingRegistrations failed", error); return []; }
+  return data || [];
+}
+async function approveRegistration(registration, reviewerName) {
+  const newPatientId = uid("pt");
+  // Patients live inside the big clinic-data blob, so building the new patient/appointment
+  // records happens in the caller (which already has the current `data` in memory) — this
+  // function only marks the registration itself as approved and links the new patient id.
+  const { error } = await supabase
+    .from("patient_registrations")
+    .update({ status: "approved", reviewed_by: reviewerName, reviewed_at: new Date().toISOString(), patient_id: newPatientId })
+    .eq("id", registration.id)
+    .eq("status", "pending"); // guards against double-approving if two staff click at once
+  if (error) { console.error("approveRegistration failed", error); return null; }
+  return newPatientId;
+}
+async function rejectRegistration(registrationId, reviewerName) {
+  const { error } = await supabase
+    .from("patient_registrations")
+    .update({ status: "rejected", reviewed_by: reviewerName, reviewed_at: new Date().toISOString() })
+    .eq("id", registrationId)
+    .eq("status", "pending");
+  if (error) console.error("rejectRegistration failed", error);
+}
+
 /* ---------------- Dose-column & remarks helpers ---------------- */
 function deriveDoseSlots(freqText, doseText) {
   const f = freqText || "";
@@ -660,6 +695,7 @@ export default function ClinicEMR() {
   const [rxTemplates, setRxTemplates] = useState(defaultRxTemplates());
   const [labTemplates, setLabTemplates] = useState(defaultLabTemplates());
   const [dosingRules, setDosingRules] = useState(defaultDosingRules());
+  const [pendingRegistrations, setPendingRegistrations] = useState([]);
   const [view, setView] = useState("dashboard");
   const [selectedPatientId, setSelectedPatientId] = useState(null);
   const [toast, setToast] = useState(null);
@@ -682,7 +718,7 @@ export default function ClinicEMR() {
     if (!userId) { setMyProfile(null); return; }
     (async () => {
       setDataLoading(true);
-      const [profile, d, c, allStaff, meds, templates, labTpls, dRules] = await Promise.all([
+      const [profile, d, c, allStaff, meds, templates, labTpls, dRules, pendingRegs] = await Promise.all([
         loadMyProfile(userId),
         loadClinicData(),
         loadClinicInfo(),
@@ -691,6 +727,7 @@ export default function ClinicEMR() {
         loadRxTemplates(),
         loadLabTemplates(),
         loadDosingRules(),
+        loadPendingRegistrations(),
       ]);
 
       // One-time, self-healing merge: fill in `indication` on any existing Rx Template or
@@ -723,6 +760,7 @@ export default function ClinicEMR() {
       setRxTemplates(backfilledTemplates);
       setLabTemplates(labTpls);
       setDosingRules(dRules);
+      setPendingRegistrations(pendingRegs);
       setDataLoading(false);
     })();
   }, [userId]);
@@ -751,6 +789,54 @@ export default function ClinicEMR() {
     setDosingRules(next);
     await saveDosingRules(next);
   }, []);
+
+  async function handleApproveRegistration(registration) {
+    const newPatientId = await approveRegistration(registration, myProfile.name);
+    if (!newPatientId) return false;
+    const newPatient = {
+      id: newPatientId,
+      name: registration.name,
+      dob: registration.dob || "",
+      sex: registration.sex || "",
+      contact: registration.contact || "",
+      address: registration.address || "",
+      guardian: registration.guardian || "",
+      allergies: registration.allergies || "",
+      history: [],
+    };
+    const newAppt = {
+      id: uid("appt"),
+      patientId: newPatientId,
+      date: registration.appointment_date,
+      time: registration.appointment_time,
+      provider: "TBD",
+      reason: "Online booking",
+    };
+    const auditEntry = {
+      id: uid("audit"),
+      patientId: newPatientId,
+      date: new Date().toISOString(),
+      provider: myProfile.name,
+      action: "patient_created",
+      summary: `Registered online, GCash ref ${registration.gcash_reference}`,
+    };
+    const nextData = {
+      ...data,
+      patients: [...data.patients, newPatient],
+      appointments: [...data.appointments, newAppt],
+      auditLog: [...(data.auditLog || []), auditEntry],
+    };
+    await persist(nextData);
+    setPendingRegistrations((prev) => prev.filter((r) => r.id !== registration.id));
+    showToast("Registration approved — patient and appointment created");
+    return true;
+  }
+
+  async function handleRejectRegistration(registrationId) {
+    await rejectRegistration(registrationId, myProfile.name);
+    setPendingRegistrations((prev) => prev.filter((r) => r.id !== registrationId));
+    showToast("Registration declined");
+  }
 
   const persist = useCallback(async (next) => {
     setData(next);
@@ -806,6 +892,7 @@ export default function ClinicEMR() {
         currentUser={currentUser}
         onSignOut={() => supabase.auth.signOut()}
         showToast={showToast}
+        pendingCount={pendingRegistrations.length}
       />
       <main style={styles.main}>
         <TopBar currentUser={currentUser} />
@@ -864,6 +951,13 @@ export default function ClinicEMR() {
                 setSelectedPatientId(null);
                 setView("patients");
               }}
+            />
+          )}
+          {view === "registrations" && (
+            <RegistrationsPage
+              registrations={pendingRegistrations}
+              onApprove={handleApproveRegistration}
+              onReject={handleRejectRegistration}
             />
           )}
           {view === "medications" && (
@@ -1023,12 +1117,13 @@ function PrivacyBanner() {
 }
 
 /* ---------------- Sidebar ---------------- */
-function Sidebar({ view, setView, currentUser, onSignOut, showToast }) {
+function Sidebar({ view, setView, currentUser, onSignOut, showToast, pendingCount }) {
   const [showChangePassword, setShowChangePassword] = useState(false);
   const items = [
     { key: "dashboard", label: "Dashboard", icon: Home },
     { key: "schedule", label: "Schedule", icon: CalendarDays },
     { key: "patients", label: "Patients", icon: Users },
+    { key: "registrations", label: "Registrations", icon: Inbox, badge: pendingCount },
     { key: "medications", label: "Medications", icon: Pill },
     { key: "templates", label: "Rx Templates", icon: Layers },
     { key: "staff", label: "Staff", icon: UserRound },
@@ -1042,7 +1137,7 @@ function Sidebar({ view, setView, currentUser, onSignOut, showToast }) {
         </span>
       </div>
       <nav style={{ display: "flex", flexDirection: "column", gap: 2, padding: "0 10px" }}>
-        {items.map(({ key, label, icon: Icon }) => (
+        {items.map(({ key, label, icon: Icon, badge }) => (
           <button
             key={key}
             onClick={() => setView(key)}
@@ -1052,7 +1147,8 @@ function Sidebar({ view, setView, currentUser, onSignOut, showToast }) {
             }}
           >
             <Icon size={17} />
-            <span>{label}</span>
+            <span style={{ flex: 1 }}>{label}</span>
+            {!!badge && <span style={styles.navBadge}>{badge}</span>}
           </button>
         ))}
       </nav>
@@ -1352,6 +1448,7 @@ function ApptForm({ patients, defaultDate, defaultProvider, onSubmit }) {
 function PatientsList({ data, persist, showToast, currentUser, onOpenPatient }) {
   const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [showMerge, setShowMerge] = useState(false);
 
   const filtered = data.patients.filter((p) =>
     p.name.toLowerCase().includes(query.toLowerCase())
@@ -1366,13 +1463,69 @@ function PatientsList({ data, persist, showToast, currentUser, onOpenPatient }) 
     setShowForm(false);
   }
 
+  async function mergePatients(keepId, dupId) {
+    const keepPatient = data.patients.find((p) => p.id === keepId);
+    const dupPatient = data.patients.find((p) => p.id === dupId);
+    if (!keepPatient || !dupPatient) return;
+
+    // Keep patient's own values always win; the duplicate only fills in fields the keep
+    // patient doesn't already have. Nothing on the keep record is ever overwritten.
+    const filledFields = {};
+    for (const field of ["dob", "sex", "contact", "address", "guardian", "allergies"]) {
+      filledFields[field] = keepPatient[field] || dupPatient[field] || "";
+    }
+    const mergedHistory = [...(keepPatient.history || []), ...(dupPatient.history || [])]
+      .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+    const mergedPatient = { ...keepPatient, ...filledFields, history: mergedHistory };
+
+    const patients = data.patients.filter((p) => p.id !== dupId).map((p) => (p.id === keepId ? mergedPatient : p));
+
+    const reassign = (arr) => (arr || []).map((item) => (item.patientId === dupId ? { ...item, patientId: keepId } : item));
+    const appointments = reassign(data.appointments);
+    const treatmentPlans = reassign(data.treatmentPlans);
+    const prescriptions = reassign(data.prescriptions);
+    const certificates = reassign(data.certificates);
+    const physicalExams = reassign(data.physicalExams);
+    const labRequests = reassign(data.labRequests);
+    const reassignedAudit = reassign(data.auditLog);
+
+    const mergeAuditEntry = {
+      id: uid("audit"),
+      patientId: keepId,
+      date: new Date().toISOString(),
+      provider: currentUser.name,
+      action: "patients_merged",
+      summary: `Merged duplicate record "${dupPatient.name}" (MRN ${dupPatient.id}) into this patient`,
+    };
+
+    const next = {
+      ...data,
+      patients,
+      appointments,
+      treatmentPlans,
+      prescriptions,
+      certificates,
+      physicalExams,
+      labRequests,
+      auditLog: [...reassignedAudit, mergeAuditEntry],
+    };
+    await persist(next);
+    showToast(`Merged into ${keepPatient.name}`);
+    setShowMerge(false);
+  }
+
   return (
     <div>
       <div style={styles.pageHeader}>
         <h2 style={styles.h2}>Patients</h2>
-        <button style={styles.primaryBtn} onClick={() => setShowForm(true)}>
-          <Plus size={15} /> Add patient
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button style={{ ...styles.primaryBtn, background: "#fff", color: "#0F5E56", border: "1px solid #0F5E56" }} onClick={() => setShowMerge(true)}>
+            Merge duplicates
+          </button>
+          <button style={styles.primaryBtn} onClick={() => setShowForm(true)}>
+            <Plus size={15} /> Add patient
+          </button>
+        </div>
       </div>
 
       <div style={{ position: "relative", marginBottom: 14 }}>
@@ -1422,7 +1575,85 @@ function PatientsList({ data, persist, showToast, currentUser, onOpenPatient }) 
           <PatientForm onSubmit={addPatient} />
         </Modal>
       )}
+      {showMerge && (
+        <MergePatientsModal patients={data.patients} onMerge={mergePatients} onClose={() => setShowMerge(false)} />
+      )}
     </div>
+  );
+}
+
+function MergePatientsModal({ patients, onMerge, onClose }) {
+  const [keepId, setKeepId] = useState("");
+  const [dupId, setDupId] = useState("");
+  const [merging, setMerging] = useState(false);
+
+  const keepPatient = patients.find((p) => p.id === keepId);
+  const dupPatient = patients.find((p) => p.id === dupId);
+  const bothPicked = keepPatient && dupPatient && keepId !== dupId;
+
+  const gapsFilledCount = bothPicked
+    ? ["dob", "sex", "contact", "address", "guardian", "allergies"].filter((f) => !keepPatient[f] && dupPatient[f]).length
+    : 0;
+
+  async function confirmMerge() {
+    setMerging(true);
+    await onMerge(keepId, dupId);
+    setMerging(false);
+  }
+
+  return (
+    <Modal title="Merge duplicate patients" onClose={onClose}>
+      <div style={{ fontSize: 12.5, color: "#5B6B68", marginBottom: 14 }}>
+        Pick the record to keep and the duplicate to fold into it. Every chart note, treatment
+        plan, prescription, certificate, exam, lab request, and appointment on the duplicate
+        moves onto the kept record — the duplicate is then removed.
+      </div>
+
+      <Field label="Patient to keep">
+        <select style={styles.input} value={keepId} onChange={(e) => setKeepId(e.target.value)}>
+          <option value="">Select a patient</option>
+          {patients.map((p) => (
+            <option key={p.id} value={p.id} disabled={p.id === dupId}>{p.name} — MRN {p.id}</option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Duplicate to merge in (will be removed)">
+        <select style={styles.input} value={dupId} onChange={(e) => setDupId(e.target.value)}>
+          <option value="">Select a patient</option>
+          {patients.map((p) => (
+            <option key={p.id} value={p.id} disabled={p.id === keepId}>{p.name} — MRN {p.id}</option>
+          ))}
+        </select>
+      </Field>
+
+      {bothPicked && (
+        <>
+          <div style={{ ...styles.card, background: "#F7F8F7", marginTop: 4 }}>
+            <div style={{ fontSize: 12.5, color: "#12312D", lineHeight: 1.8 }}>
+              <div><b>{keepPatient.name}</b> stays. Its own details are never overwritten.</div>
+              <div>
+                {gapsFilledCount > 0
+                  ? `${gapsFilledCount} blank field${gapsFilledCount === 1 ? "" : "s"} will be filled in from ${dupPatient.name}'s record.`
+                  : `No blank fields to fill in from ${dupPatient.name}'s record.`}
+              </div>
+              <div>
+                {(dupPatient.history || []).length} chart note(s), moving to {keepPatient.name}.
+              </div>
+            </div>
+          </div>
+          <div style={{ fontSize: 11.5, color: "#B23B3B", marginTop: 10 }}>
+            This can't be undone from within the app.
+          </div>
+          <button
+            style={{ ...styles.primaryBtn, justifyContent: "center", width: "100%", marginTop: 14 }}
+            onClick={confirmMerge}
+            disabled={merging}
+          >
+            {merging ? "Merging…" : `Merge into ${keepPatient.name}`}
+          </button>
+        </>
+      )}
+    </Modal>
   );
 }
 
@@ -3243,6 +3474,90 @@ function detailChecked(detailMap, label) {
 }
 
 /* ---------------- Medications (editable, shared across the clinic) ---------------- */
+/* ---------------- Online Registrations (from the public booking website) ---------------- */
+function RegistrationsPage({ registrations, onApprove, onReject }) {
+  const [busyId, setBusyId] = useState(null);
+
+  async function approve(r) {
+    setBusyId(r.id);
+    await onApprove(r);
+    setBusyId(null);
+  }
+  async function reject(r) {
+    setBusyId(r.id);
+    await onReject(r.id);
+    setBusyId(null);
+  }
+
+  return (
+    <div>
+      <div style={styles.pageHeader}>
+        <h2 style={styles.h2}>Registrations</h2>
+      </div>
+      <div style={{ fontSize: 12.5, color: "#5B6B68", marginBottom: 14 }}>
+        Online bookings from the clinic website, waiting for review. Check the GCash reference
+        against your own payment records before approving — approving creates a new patient
+        record and adds their appointment to the schedule.
+      </div>
+
+      {registrations.length === 0 ? (
+        <SectionCard title="Pending"><EmptyState text="No pending registrations right now." /></SectionCard>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {registrations.map((r) => {
+            const age = calcAge(r.dob);
+            const isPeds = age !== null && age < 18;
+            const busy = busyId === r.id;
+            return (
+              <div key={r.id} style={styles.card}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ ...styles.avatarDot, background: isPeds ? "#C97A2B" : "#0F5E56" }}>
+                      {isPeds ? <Baby size={14} color="#fff" /> : <UserRound size={14} color="#fff" />}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 600, color: "#12312D" }}>{r.name}</div>
+                      <div style={{ fontSize: 12, color: "#5B6B68" }}>
+                        {age !== null ? `${age} yrs` : "Age unknown"} · {r.sex || "—"}
+                        {r.guardian ? ` · Guardian: ${r.guardian}` : ""}
+                      </div>
+                    </div>
+                  </div>
+                  <span style={styles.pill}>Submitted {fmtDateTime(r.created_at)}</span>
+                </div>
+
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 18px", fontSize: 12.5, color: "#2A3B38", marginBottom: 8 }}>
+                  <span><b>Requested:</b> {fmtDate(r.appointment_date)} at {r.appointment_time}</span>
+                  <span><b>Contact:</b> {r.contact || "—"}</span>
+                  <span><b>Address:</b> {r.address || "—"}</span>
+                  {r.allergies && <span><b>Allergies:</b> {r.allergies}</span>}
+                </div>
+
+                <div style={{ ...styles.mono, fontSize: 12.5, background: "#F7F8F7", borderRadius: 8, padding: "6px 10px", marginBottom: 10 }}>
+                  GCash reference: {r.gcash_reference}
+                </div>
+
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button style={{ ...styles.primaryBtn, justifyContent: "center" }} onClick={() => approve(r)} disabled={busy}>
+                    <Check size={15} /> {busy ? "Working…" : "Approve"}
+                  </button>
+                  <button
+                    style={{ ...styles.linkBtn, padding: "9px 14px", color: "#B23B3B" }}
+                    onClick={() => reject(r)}
+                    disabled={busy}
+                  >
+                    Decline
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MedicationsPage({ commonMeds, persistCommonMeds, dosingRules, persistDosingRules, showToast, userRole }) {
   const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -3805,6 +4120,7 @@ const styles = {
   bannerClose: { background: "none", border: "none", cursor: "pointer", color: "#8A4B12", padding: 2 },
   navBtn: { display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", color: "#B9CBC8", padding: "9px 10px", borderRadius: 8, fontSize: 13.5, cursor: "pointer", textAlign: "left" },
   navBtnActive: { background: "rgba(255,255,255,0.08)", color: "#fff" },
+  navBadge: { background: "#C97A2B", color: "#fff", fontSize: 10.5, fontWeight: 700, borderRadius: 10, padding: "1px 6px", flexShrink: 0 },
   signOutBtn: { display: "flex", alignItems: "center", gap: 6, background: "none", border: "1px solid rgba(255,255,255,0.15)", color: "#B9CBC8", borderRadius: 8, padding: "6px 10px", fontSize: 12, cursor: "pointer", width: "100%", justifyContent: "center" },
   statRow: { display: "flex", gap: 14, margin: "20px 0" },
   statCard: { flex: 1, display: "flex", alignItems: "center", gap: 12, background: "#fff", border: "1px solid #E4EAE8", borderRadius: 12, padding: 16 },
