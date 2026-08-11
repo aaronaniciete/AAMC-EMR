@@ -455,6 +455,16 @@ async function saveLabTemplates(templates) {
   const { error } = await supabase.from("app_state").upsert({ key: "lab-templates", value: templates, updated_at: new Date().toISOString() });
   if (error) console.error("saveLabTemplates failed", error);
 }
+async function loadDosingRules() {
+  const { data, error } = await supabase.from("app_state").select("value").eq("key", "dosing-rules").maybeSingle();
+  if (error) { console.error("loadDosingRules failed", error); return defaultDosingRules(); }
+  if (!data) return defaultDosingRules();
+  return Array.isArray(data.value) ? data.value : defaultDosingRules();
+}
+async function saveDosingRules(rules) {
+  const { error } = await supabase.from("app_state").upsert({ key: "dosing-rules", value: rules, updated_at: new Date().toISOString() });
+  if (error) console.error("saveDosingRules failed", error);
+}
 
 /* ---------------- Dose-column & remarks helpers ---------------- */
 function deriveDoseSlots(freqText, doseText) {
@@ -481,32 +491,59 @@ function buildRemarks(duration, notes) {
 // Weight-based dosing rules — matched against a medication's name. Each rule gives a total
 // daily dose per kg, split across a number of even doses per day. Add more entries here to
 // extend this to other medications later; not limited to Co-Amoxiclav.
-const WEIGHT_DOSING_RULES = [
-  {
-    match: (name) => /co-amoxiclav/i.test(name) && /mg\s*\/\s*5\s*mL/i.test(name),
-    mgPerKgPerDay: 40,
-    dosesPerDay: 3,
-    label: "40 mg/kg/day ÷ 3 doses (every 8 hours)",
-  },
+// Weight-based dosing rules — matched against a medication's name (only against liquid/syrup
+// formulations, i.e. names containing an "mg/mL"-style concentration). Values are stored in the
+// database and edited from Medications → Dosing Rules, not hardcoded — this default set is only
+// the starting point the first time the app runs.
+const defaultDosingRules = () => [
+  { id: "rule-co-amoxiclav", drugMatch: "Co-Amoxiclav", mgPerKgPerDay: 40, everyHours: 8 },
+  { id: "rule-cefixime", drugMatch: "Cefixime", mgPerKgPerDay: null, everyHours: null },
+  { id: "rule-cetirizine", drugMatch: "Cetirizine", mgPerKgPerDay: null, everyHours: null },
+  { id: "rule-paracetamol", drugMatch: "Paracetamol", mgPerKgPerDay: null, everyHours: null },
+  { id: "rule-amoxicillin", drugMatch: "Amoxicillin", mgPerKgPerDay: null, everyHours: null },
+  { id: "rule-cefalexin", drugMatch: "Cefalexin", mgPerKgPerDay: null, everyHours: null },
+  { id: "rule-cefuroxime", drugMatch: "Cefuroxime", mgPerKgPerDay: null, everyHours: null },
+  { id: "rule-cefaclor", drugMatch: "Cefaclor", mgPerKgPerDay: null, everyHours: null },
+  { id: "rule-ibuprofen", drugMatch: "Ibuprofen", mgPerKgPerDay: null, everyHours: null },
+  { id: "rule-domperidone", drugMatch: "Domperidone", mgPerKgPerDay: null, everyHours: null },
+  { id: "rule-prednisone", drugMatch: "Prednisone", mgPerKgPerDay: null, everyHours: null },
+  { id: "rule-racecadotril", drugMatch: "Racecadotril", mgPerKgPerDay: null, everyHours: null },
+  { id: "rule-prednisolone", drugMatch: "Prednisolone", mgPerKgPerDay: null, everyHours: null },
 ];
 
-function getWeightDosingRule(medName) {
-  if (!medName) return null;
-  return WEIGHT_DOSING_RULES.find((r) => r.match(medName)) || null;
+function dosesPerDayFor(everyHours) {
+  return everyHours ? Math.max(1, Math.round(24 / everyHours)) : null;
 }
 
-// Reads the concentration straight from the medication name (e.g. "312.5mg/5mL") so the
-// suggestion always matches whichever strength is actually selected.
+function dosingRuleLabel(rule) {
+  const doses = dosesPerDayFor(rule.everyHours);
+  if (!rule.mgPerKgPerDay || !doses) return `${rule.drugMatch} — not yet set`;
+  return `${rule.mgPerKgPerDay} mg/kg/day ÷ ${doses} dose${doses === 1 ? "" : "s"} (every ${rule.everyHours} hours)`;
+}
+
+// Only matches liquid/syrup formulations of the drug (names with an "mg/mL"-style
+// concentration) — tablets of the same drug are intentionally excluded.
+function getWeightDosingRule(medName, rules) {
+  if (!medName || !/mg\s*\/\s*\d*\s*mL/i.test(medName)) return null;
+  const lower = medName.toLowerCase();
+  return (rules || []).find((r) => lower.includes(r.drugMatch.toLowerCase())) || null;
+}
+
+// Reads the concentration straight from the medication name (e.g. "312.5mg/5mL" or
+// "100mg/mL") so the suggestion always matches whichever strength is actually selected.
 function computeWeightDose(medName, weightKg, rule) {
-  const concMatch = medName.match(/(\d+(?:\.\d+)?)\s*mg\s*\/\s*5\s*mL/i);
+  const doses = dosesPerDayFor(rule.everyHours);
+  if (!rule.mgPerKgPerDay || !doses) return null;
+  const concMatch = medName.match(/(\d+(?:\.\d+)?)\s*mg\s*\/\s*(\d+)?\s*mL/i);
   if (!concMatch || !weightKg || weightKg <= 0) return null;
-  const mgPer5ml = parseFloat(concMatch[1]);
-  const mgPerMl = mgPer5ml / 5;
+  const mgPerUnit = parseFloat(concMatch[1]);
+  const unitMl = concMatch[2] ? parseFloat(concMatch[2]) : 1;
+  const mgPerMl = mgPerUnit / unitMl;
   const totalDailyMg = rule.mgPerKgPerDay * weightKg;
-  const perDoseMg = totalDailyMg / rule.dosesPerDay;
+  const perDoseMg = totalDailyMg / doses;
   const perDoseMl = perDoseMg / mgPerMl;
   return {
-    mgPer5ml,
+    concentrationLabel: `${mgPerUnit}mg/${unitMl}mL`,
     totalDailyMg: Math.round(totalDailyMg * 10) / 10,
     perDoseMg: Math.round(perDoseMg * 10) / 10,
     perDoseMl: Math.round(perDoseMl * 10) / 10,
@@ -556,6 +593,7 @@ export default function ClinicEMR() {
   const [commonMeds, setCommonMeds] = useState(defaultCommonMeds());
   const [rxTemplates, setRxTemplates] = useState(defaultRxTemplates());
   const [labTemplates, setLabTemplates] = useState(defaultLabTemplates());
+  const [dosingRules, setDosingRules] = useState(defaultDosingRules());
   const [view, setView] = useState("dashboard");
   const [selectedPatientId, setSelectedPatientId] = useState(null);
   const [toast, setToast] = useState(null);
@@ -578,7 +616,7 @@ export default function ClinicEMR() {
     if (!userId) { setMyProfile(null); return; }
     (async () => {
       setDataLoading(true);
-      const [profile, d, c, allStaff, meds, templates, labTpls] = await Promise.all([
+      const [profile, d, c, allStaff, meds, templates, labTpls, dRules] = await Promise.all([
         loadMyProfile(userId),
         loadClinicData(),
         loadClinicInfo(),
@@ -586,6 +624,7 @@ export default function ClinicEMR() {
         loadCommonMeds(),
         loadRxTemplates(),
         loadLabTemplates(),
+        loadDosingRules(),
       ]);
 
       // One-time, self-healing merge: fill in `indication` on any existing Rx Template or
@@ -617,6 +656,7 @@ export default function ClinicEMR() {
       setCommonMeds(meds);
       setRxTemplates(backfilledTemplates);
       setLabTemplates(labTpls);
+      setDosingRules(dRules);
       setDataLoading(false);
     })();
   }, [userId]);
@@ -639,6 +679,11 @@ export default function ClinicEMR() {
   const persistLabTemplates = useCallback(async (next) => {
     setLabTemplates(next);
     await saveLabTemplates(next);
+  }, []);
+
+  const persistDosingRules = useCallback(async (next) => {
+    setDosingRules(next);
+    await saveDosingRules(next);
   }, []);
 
   const persist = useCallback(async (next) => {
@@ -747,6 +792,7 @@ export default function ClinicEMR() {
               rxTemplates={rxTemplates}
               labTemplates={labTemplates}
               persistLabTemplates={persistLabTemplates}
+              dosingRules={dosingRules}
               onBack={() => {
                 setSelectedPatientId(null);
                 setView("patients");
@@ -754,13 +800,20 @@ export default function ClinicEMR() {
             />
           )}
           {view === "medications" && (
-            <MedicationsPage commonMeds={commonMeds} persistCommonMeds={persistCommonMeds} showToast={showToast} />
+            <MedicationsPage
+              commonMeds={commonMeds}
+              persistCommonMeds={persistCommonMeds}
+              dosingRules={dosingRules}
+              persistDosingRules={persistDosingRules}
+              showToast={showToast}
+            />
           )}
           {view === "templates" && (
             <RxTemplatesPage
               rxTemplates={rxTemplates}
               persistRxTemplates={persistRxTemplates}
               commonMeds={commonMeds}
+              dosingRules={dosingRules}
               showToast={showToast}
             />
           )}
@@ -1300,7 +1353,7 @@ const PATIENT_EDITABLE_FIELDS = [
   { key: "allergies", label: "Allergies" },
 ];
 
-function PatientDetail({ patient, data, persist, currentUser, showToast, clinicInfo, commonMeds, rxTemplates, labTemplates, persistLabTemplates, onBack }) {
+function PatientDetail({ patient, data, persist, currentUser, showToast, clinicInfo, commonMeds, rxTemplates, labTemplates, persistLabTemplates, dosingRules, onBack }) {
   const [tab, setTab] = useState("chart");
   const [formsJumpTo, setFormsJumpTo] = useState(null); // lets "Order Labs" (in Treatment Plans) open Forms straight to the lab request
   const [showEditPatient, setShowEditPatient] = useState(false);
@@ -1445,7 +1498,7 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
 
       {tab === "chart" && <ChartTab history={history} onAddNote={addNote} onEditNote={editNote} />}
       {tab === "plans" && <PlansTab plans={plans} onAddPlan={addPlan} onEditPlan={editPlan} onOrderLabs={goOrderLabs} />}
-      {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} commonMeds={commonMeds} rxTemplates={rxTemplates} history={history} />}
+      {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} commonMeds={commonMeds} rxTemplates={rxTemplates} history={history} dosingRules={dosingRules} />}
       {tab === "forms" && (
         <FormsTab
           certs={certs}
@@ -1690,7 +1743,7 @@ function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs }) {
   );
 }
 
-function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds, rxTemplates, history }) {
+function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds, rxTemplates, history, dosingRules }) {
   const [showForm, setShowForm] = useState(false);
   const [meds, setMeds] = useState([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "", indication: "" }]);
   const [notes, setNotes] = useState("");
@@ -1785,7 +1838,7 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
               q.length >= 3
                 ? medList.filter((m) => m.name.toLowerCase().includes(q)).slice(0, 6)
                 : [];
-            const doseRule = getWeightDosingRule(row.name);
+            const doseRule = getWeightDosingRule(row.name, dosingRules);
             const doseCalc = doseRule ? computeWeightDose(row.name, patientWeightKg, doseRule) : null;
             return (
               <div key={i} style={{ marginBottom: 8 }}>
@@ -1841,16 +1894,21 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
                   <div style={styles.doseHint}>
                     {doseCalc ? (
                       <>
-                        <b>Weight-based dose suggestion:</b> {doseRule.label} × {patientWeightKg}kg
-                        {" "}= {doseCalc.totalDailyMg}mg/day ({doseCalc.mgPer5ml}mg/5mL formulation)
+                        <b>Weight-based dose suggestion:</b> {dosingRuleLabel(doseRule)} × {patientWeightKg}kg
+                        {" "}= {doseCalc.totalDailyMg}mg/day ({doseCalc.concentrationLabel} formulation)
                         {" "}→ <b>{doseCalc.perDoseMl}mL per dose</b>
                         <button type="button" style={styles.doseHintBtn} onClick={() => applyWeightDose(i, doseCalc.perDoseMl)}>
                           Use for AM/NN/PM
                         </button>
                       </>
+                    ) : !doseRule.mgPerKgPerDay || !doseRule.everyHours ? (
+                      <>
+                        <b>Weight-based dosing not set up yet</b> for {doseRule.drugMatch} — add the mg/kg/day
+                        and dosing interval in Medications → Dosing Rules.
+                      </>
                     ) : (
                       <>
-                        <b>Weight-based dosing available</b> ({doseRule.label}) — add this patient's weight
+                        <b>Weight-based dosing available</b> ({dosingRuleLabel(doseRule)}) — add this patient's weight
                         in a chart note first to get an mL suggestion.
                       </>
                     )}
@@ -2977,7 +3035,7 @@ function detailChecked(detailMap, label) {
 }
 
 /* ---------------- Medications (editable, shared across the clinic) ---------------- */
-function MedicationsPage({ commonMeds, persistCommonMeds, showToast }) {
+function MedicationsPage({ commonMeds, persistCommonMeds, dosingRules, persistDosingRules, showToast }) {
   const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editingIndex, setEditingIndex] = useState(null);
@@ -3103,12 +3161,117 @@ function MedicationsPage({ commonMeds, persistCommonMeds, showToast }) {
           </div>
         )}
       </SectionCard>
+
+      <DosingRulesSection dosingRules={dosingRules} persistDosingRules={persistDosingRules} showToast={showToast} />
+    </div>
+  );
+}
+
+function DosingRulesSection({ dosingRules, persistDosingRules, showToast }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [drugMatch, setDrugMatch] = useState("");
+  const [mgPerKgPerDay, setMgPerKgPerDay] = useState("");
+  const [everyHours, setEveryHours] = useState("");
+
+  function resetForm() {
+    setDrugMatch(""); setMgPerKgPerDay(""); setEveryHours("");
+    setEditingId(null); setShowForm(false);
+  }
+
+  function startAdd() {
+    resetForm();
+    setShowForm(true);
+  }
+
+  function startEdit(rule) {
+    setDrugMatch(rule.drugMatch);
+    setMgPerKgPerDay(rule.mgPerKgPerDay || "");
+    setEveryHours(rule.everyHours || "");
+    setEditingId(rule.id);
+    setShowForm(true);
+  }
+
+  async function save() {
+    if (!drugMatch.trim()) return;
+    const entry = {
+      id: editingId || uid("rule"),
+      drugMatch: drugMatch.trim(),
+      mgPerKgPerDay: mgPerKgPerDay ? parseFloat(mgPerKgPerDay) : null,
+      everyHours: everyHours ? parseFloat(everyHours) : null,
+    };
+    const next = editingId ? dosingRules.map((r) => (r.id === editingId ? entry : r)) : [...dosingRules, entry];
+    await persistDosingRules(next);
+    showToast(editingId ? "Dosing rule updated" : "Dosing rule added");
+    resetForm();
+  }
+
+  async function removeRule(id) {
+    await persistDosingRules(dosingRules.filter((r) => r.id !== id));
+    showToast("Dosing rule removed");
+  }
+
+  return (
+    <div>
+      <div style={{ ...styles.pageHeader, marginTop: 28 }}>
+        <h2 style={{ ...styles.h2, fontSize: 18 }}>Weight-based dosing rules</h2>
+        <button style={styles.primaryBtn} onClick={startAdd}><Plus size={15} /> New dosing rule</button>
+      </div>
+      <div style={{ fontSize: 12.5, color: "#5B6B68", marginBottom: 14 }}>
+        Applies only to liquid/syrup formulations whose name matches — e.g. "Cefixime" matches
+        "Cefixime 100mg/5mL (Zelpis)" but not the adult tablet. Used to suggest an mL dose per
+        patient in prescriptions, based on their recorded weight.
+      </div>
+
+      {showForm && (
+        <div style={styles.card}>
+          <Field label="Medication name contains">
+            <input style={styles.input} value={drugMatch} onChange={(e) => setDrugMatch(e.target.value)} placeholder="e.g. Cefixime" />
+          </Field>
+          <div style={{ display: "flex", gap: 10 }}>
+            <Field label="mg per kg per day" style={{ flex: 1 }}>
+              <input style={styles.input} type="number" value={mgPerKgPerDay} onChange={(e) => setMgPerKgPerDay(e.target.value)} placeholder="e.g. 40" />
+            </Field>
+            <Field label="Every how many hours" style={{ flex: 1 }}>
+              <input style={styles.input} type="number" value={everyHours} onChange={(e) => setEveryHours(e.target.value)} placeholder="e.g. 8" />
+            </Field>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <button style={{ ...styles.primaryBtn, justifyContent: "center" }} onClick={save}>
+              <Check size={15} /> {editingId ? "Save changes" : "Add rule"}
+            </button>
+            <button style={{ ...styles.linkBtn, padding: "9px 14px" }} onClick={resetForm}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      <SectionCard title={`Rules (${dosingRules.length})`}>
+        {dosingRules.length === 0 ? (
+          <EmptyState text="No dosing rules yet." />
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {dosingRules.map((r) => {
+              const isSet = r.mgPerKgPerDay && r.everyHours;
+              return (
+                <div key={r.id} style={styles.patientRow}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, color: "#12312D" }}>{r.drugMatch}</div>
+                    <div style={{ fontSize: 12, color: isSet ? "#5B6B68" : "#B23B3B" }}>{dosingRuleLabel(r)}</div>
+                  </div>
+                  <button style={styles.iconBtn} onClick={() => startEdit(r)} aria-label="Edit"><Pencil size={14} /></button>
+                  <button style={styles.iconBtn} onClick={() => removeRule(r.id)} aria-label="Remove"><Trash2 size={14} /></button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </SectionCard>
     </div>
   );
 }
 
 /* ---------------- Rx Templates (diagnosis bundles) ---------------- */
-function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, showToast }) {
+function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, dosingRules, showToast }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [label, setLabel] = useState("");
@@ -3198,7 +3361,7 @@ function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, showToas
           {meds.map((row, i) => {
             const q = row.name.trim().toLowerCase();
             const suggestions = q.length >= 3 ? medList.filter((m) => m.name.toLowerCase().includes(q)).slice(0, 6) : [];
-            const doseRule = getWeightDosingRule(row.name);
+            const doseRule = getWeightDosingRule(row.name, dosingRules);
             return (
               <div key={i} style={{ marginBottom: 8 }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
@@ -3242,7 +3405,7 @@ function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, showToas
                 />
                 {doseRule && (
                   <div style={styles.doseHint}>
-                    <b>Weight-based dosing available</b> ({doseRule.label}) — a specific mL amount
+                    <b>Weight-based dosing available</b> ({dosingRuleLabel(doseRule)}) — a specific mL amount
                     will be suggested automatically when this template is used on a patient with a
                     recorded weight.
                   </div>
