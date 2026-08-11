@@ -1301,10 +1301,26 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
     showToast("Chart note added");
   }
 
+  async function editNote(noteId, updates) {
+    const patients = data.patients.map((p) =>
+      p.id === patient.id
+        ? { ...p, history: (p.history || []).map((h) => (h.id === noteId ? { ...h, ...updates } : h)) }
+        : p
+    );
+    await persist(withAudit({ ...data, patients }, "chart_note_edited", "Edited a chart note"));
+    showToast("Chart note updated");
+  }
+
   async function addPlan(plan) {
     const treatmentPlans = [...data.treatmentPlans, { ...plan, id: uid("plan"), patientId: patient.id, date: new Date().toISOString(), provider: currentUser.name }];
     await persist(withAudit({ ...data, treatmentPlans }, "treatment_plan_added", plan.diagnosis ? `Treatment plan: ${plan.diagnosis}` : "Added a treatment plan"));
     showToast("Treatment plan saved");
+  }
+
+  async function editPlan(planId, updates) {
+    const treatmentPlans = data.treatmentPlans.map((t) => (t.id === planId ? { ...t, ...updates } : t));
+    await persist(withAudit({ ...data, treatmentPlans }, "treatment_plan_edited", updates.diagnosis ? `Treatment plan edited: ${updates.diagnosis}` : "Edited a treatment plan"));
+    showToast("Treatment plan updated");
   }
 
   async function addRx(rxData) {
@@ -1392,8 +1408,8 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
         ))}
       </div>
 
-      {tab === "chart" && <ChartTab history={history} onAddNote={addNote} />}
-      {tab === "plans" && <PlansTab plans={plans} onAddPlan={addPlan} onOrderLabs={goOrderLabs} />}
+      {tab === "chart" && <ChartTab history={history} onAddNote={addNote} onEditNote={editNote} />}
+      {tab === "plans" && <PlansTab plans={plans} onAddPlan={addPlan} onEditPlan={editPlan} onOrderLabs={goOrderLabs} />}
       {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} commonMeds={commonMeds} rxTemplates={rxTemplates} history={history} />}
       {tab === "forms" && (
         <FormsTab
@@ -1442,18 +1458,50 @@ function ActivityLogTab({ auditLog }) {
   );
 }
 
-function ChartTab({ history, onAddNote }) {
+function ChartTab({ history, onAddNote, onEditNote }) {
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [note, setNote] = useState("");
   const [weight, setWeight] = useState("");
   const [bp, setBp] = useState("");
   const [heartRate, setHeartRate] = useState("");
   const [temp, setTemp] = useState("");
 
+  function resetForm() {
+    setNote(""); setWeight(""); setBp(""); setHeartRate(""); setTemp("");
+    setEditingId(null); setShowForm(false);
+  }
+
+  function startAdd() {
+    resetForm();
+    setShowForm(true);
+  }
+
+  function startEdit(h) {
+    setNote(h.note || "");
+    setWeight(h.weight || "");
+    setBp(h.bp || "");
+    setHeartRate(h.heartRate || "");
+    setTemp(h.temp || "");
+    setEditingId(h.id);
+    setShowForm(true);
+  }
+
+  function save() {
+    if (!note.trim()) return;
+    const payload = { note: note.trim(), weight: weight.trim(), bp: bp.trim(), heartRate: heartRate.trim(), temp: temp.trim() };
+    if (editingId) {
+      onEditNote(editingId, payload);
+    } else {
+      onAddNote(payload);
+    }
+    resetForm();
+  }
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
-        <button style={styles.primaryBtn} onClick={() => setShowForm((s) => !s)}>
+        <button style={styles.primaryBtn} onClick={() => (showForm ? resetForm() : startAdd())}>
           <Plus size={15} /> Add chart note
         </button>
       </div>
@@ -1477,22 +1525,14 @@ function ChartTab({ history, onAddNote }) {
           <Field label="Note">
             <textarea style={{ ...styles.input, minHeight: 80, fontFamily: "inherit" }} value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
-          <button
-            style={{ ...styles.primaryBtn, justifyContent: "center", marginTop: 10 }}
-            onClick={() => {
-              if (!note.trim()) return;
-              onAddNote({
-                note: note.trim(),
-                weight: weight.trim(),
-                bp: bp.trim(),
-                heartRate: heartRate.trim(),
-                temp: temp.trim(),
-              });
-              setNote(""); setWeight(""); setBp(""); setHeartRate(""); setTemp(""); setShowForm(false);
-            }}
-          >
-            <Check size={15} /> Save note
-          </button>
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button style={{ ...styles.primaryBtn, justifyContent: "center" }} onClick={save}>
+              <Check size={15} /> {editingId ? "Save changes" : "Save note"}
+            </button>
+            {editingId && (
+              <button style={{ ...styles.linkBtn, padding: "9px 14px" }} onClick={resetForm}>Cancel</button>
+            )}
+          </div>
         </div>
       )}
       <SectionCard title="Chart history">
@@ -1509,7 +1549,10 @@ function ChartTab({ history, onAddNote }) {
               ].filter(Boolean).join(" · ") || h.vitals; // h.vitals covers notes saved before this field split
               return (
                 <div key={h.id} style={styles.entryCard}>
-                  <div style={styles.entryDate}>{fmtDateTime(h.date)}{h.provider ? ` · ${h.provider}` : ""}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div style={styles.entryDate}>{fmtDateTime(h.date)}{h.provider ? ` · ${h.provider}` : ""}</div>
+                    <button style={styles.linkBtn} onClick={() => startEdit(h)}><Pencil size={12} /> Edit</button>
+                  </div>
                   {vitalsLine && <div style={{ ...styles.mono, fontSize: 12, color: "#0F5E56", marginBottom: 4 }}>{vitalsLine}</div>}
                   <div style={{ fontSize: 13.5, color: "#2A3B38" }}>{h.note}</div>
                 </div>
@@ -1522,11 +1565,41 @@ function ChartTab({ history, onAddNote }) {
   );
 }
 
-function PlansTab({ plans, onAddPlan, onOrderLabs }) {
+function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs }) {
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [diagnosis, setDiagnosis] = useState("");
   const [plan, setPlan] = useState("");
   const [followUp, setFollowUp] = useState("");
+
+  function resetForm() {
+    setDiagnosis(""); setPlan(""); setFollowUp("");
+    setEditingId(null); setShowForm(false);
+  }
+
+  function startAdd() {
+    resetForm();
+    setShowForm(true);
+  }
+
+  function startEdit(p) {
+    setDiagnosis(p.diagnosis || "");
+    setPlan(p.plan || "");
+    setFollowUp(p.followUp || "");
+    setEditingId(p.id);
+    setShowForm(true);
+  }
+
+  function save() {
+    if (!plan.trim()) return;
+    const payload = { diagnosis: diagnosis.trim(), plan: plan.trim(), followUp: followUp.trim() };
+    if (editingId) {
+      onEditPlan(editingId, payload);
+    } else {
+      onAddPlan(payload);
+    }
+    resetForm();
+  }
 
   return (
     <div>
@@ -1534,7 +1607,7 @@ function PlansTab({ plans, onAddPlan, onOrderLabs }) {
         <button style={{ ...styles.primaryBtn, background: "#fff", color: "#0F5E56", border: "1px solid #0F5E56" }} onClick={onOrderLabs}>
           <ClipboardList size={15} /> Order labs &amp; diagnostics
         </button>
-        <button style={styles.primaryBtn} onClick={() => setShowForm((s) => !s)}>
+        <button style={styles.primaryBtn} onClick={() => (showForm ? resetForm() : startAdd())}>
           <Plus size={15} /> New treatment plan
         </button>
       </div>
@@ -1549,16 +1622,14 @@ function PlansTab({ plans, onAddPlan, onOrderLabs }) {
           <Field label="Follow-up">
             <input style={styles.input} value={followUp} onChange={(e) => setFollowUp(e.target.value)} placeholder="e.g. Recheck in 2 weeks" />
           </Field>
-          <button
-            style={{ ...styles.primaryBtn, justifyContent: "center" }}
-            onClick={() => {
-              if (!plan.trim()) return;
-              onAddPlan({ diagnosis: diagnosis.trim(), plan: plan.trim(), followUp: followUp.trim() });
-              setDiagnosis(""); setPlan(""); setFollowUp(""); setShowForm(false);
-            }}
-          >
-            <Check size={15} /> Save plan
-          </button>
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <button style={{ ...styles.primaryBtn, justifyContent: "center" }} onClick={save}>
+              <Check size={15} /> {editingId ? "Save changes" : "Save plan"}
+            </button>
+            {editingId && (
+              <button style={{ ...styles.linkBtn, padding: "9px 14px" }} onClick={resetForm}>Cancel</button>
+            )}
+          </div>
         </div>
       )}
       <SectionCard title="Treatment plan history">
@@ -1568,7 +1639,10 @@ function PlansTab({ plans, onAddPlan, onOrderLabs }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {plans.map((p) => (
               <div key={p.id} style={styles.entryCard}>
-                <div style={styles.entryDate}>{fmtDateTime(p.date)} · {p.provider}</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div style={styles.entryDate}>{fmtDateTime(p.date)} · {p.provider}</div>
+                  <button style={styles.linkBtn} onClick={() => startEdit(p)}><Pencil size={12} /> Edit</button>
+                </div>
                 {p.diagnosis && <div style={{ fontWeight: 600, fontSize: 13.5, color: "#12312D", marginBottom: 3 }}>{p.diagnosis}</div>}
                 <div style={{ fontSize: 13.5, color: "#2A3B38", whiteSpace: "pre-wrap" }}>{p.plan}</div>
                 {p.followUp && <div style={{ fontSize: 12, color: "#5B6B68", marginTop: 4 }}>Follow-up: {p.followUp}</div>}
