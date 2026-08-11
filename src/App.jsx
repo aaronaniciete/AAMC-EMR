@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import {
   CalendarDays, Users, Stethoscope, Pill, Home, Search, Plus, X,
   Baby, UserRound, AlertTriangle, ChevronLeft, Clock, FileText,
-  ShieldAlert, LogOut, Trash2, Check, ClipboardList, Pencil, Layers
+  ShieldAlert, LogOut, Trash2, Check, ClipboardList, Pencil, Layers, Lock
 } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
 
@@ -805,6 +805,7 @@ export default function ClinicEMR() {
         }}
         currentUser={currentUser}
         onSignOut={() => supabase.auth.signOut()}
+        showToast={showToast}
       />
       <main style={styles.main}>
         <TopBar currentUser={currentUser} />
@@ -1022,7 +1023,8 @@ function PrivacyBanner() {
 }
 
 /* ---------------- Sidebar ---------------- */
-function Sidebar({ view, setView, currentUser, onSignOut }) {
+function Sidebar({ view, setView, currentUser, onSignOut, showToast }) {
+  const [showChangePassword, setShowChangePassword] = useState(false);
   const items = [
     { key: "dashboard", label: "Dashboard", icon: Home },
     { key: "schedule", label: "Schedule", icon: CalendarDays },
@@ -1057,11 +1059,82 @@ function Sidebar({ view, setView, currentUser, onSignOut }) {
       <div style={{ marginTop: "auto", padding: 14, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
         <div style={{ fontSize: 12.5, color: "#B9CBC8" }}>{currentUser.name}</div>
         <div style={{ fontSize: 11, color: "#7E948F", marginBottom: 8 }}>{currentUser.role}</div>
+        <button onClick={() => setShowChangePassword(true)} style={{ ...styles.signOutBtn, marginBottom: 6 }}>
+          <Lock size={14} /> Change password
+        </button>
         <button onClick={onSignOut} style={styles.signOutBtn}>
           <LogOut size={14} /> Sign out
         </button>
       </div>
+      {showChangePassword && (
+        <ChangePasswordModal onClose={() => setShowChangePassword(false)} showToast={showToast} />
+      )}
     </aside>
+  );
+}
+
+function ChangePasswordModal({ onClose, showToast }) {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setErrorMsg("");
+    if (newPassword.length < 6) {
+      setErrorMsg("Password must be at least 6 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setErrorMsg("Passwords don't match.");
+      return;
+    }
+    setSaving(true);
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    setSaving(false);
+    if (error) {
+      setErrorMsg(error.message);
+      return;
+    }
+    showToast("Password updated");
+    onClose();
+  }
+
+  return (
+    <Modal title="Change password" onClose={onClose}>
+      <div style={{ fontSize: 12.5, color: "#5B6B68", marginBottom: 14 }}>
+        Set a new password for your own login. This replaces whatever password was assigned when
+        your account was created.
+      </div>
+      <Field label="New password">
+        <input
+          type="password"
+          style={styles.input}
+          value={newPassword}
+          onChange={(e) => setNewPassword(e.target.value)}
+          autoComplete="new-password"
+        />
+      </Field>
+      <div style={{ height: 10 }} />
+      <Field label="Confirm new password">
+        <input
+          type="password"
+          style={styles.input}
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          autoComplete="new-password"
+          onKeyDown={(e) => e.key === "Enter" && save()}
+        />
+      </Field>
+      {errorMsg && <div style={{ color: "#B23B3B", fontSize: 12.5, marginTop: 10 }}>{errorMsg}</div>}
+      <button
+        style={{ ...styles.primaryBtn, justifyContent: "center", width: "100%", marginTop: 14 }}
+        onClick={save}
+        disabled={saving}
+      >
+        {saving ? "Saving…" : "Save new password"}
+      </button>
+    </Modal>
   );
 }
 
