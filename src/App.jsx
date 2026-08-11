@@ -1515,6 +1515,7 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
           showToast={showToast}
           jumpTo={formsJumpTo}
           onJumped={() => setFormsJumpTo(null)}
+          plans={plans}
         />
       )}
       {tab === "activity" && <ActivityLogTab auditLog={auditLog} />}
@@ -2052,7 +2053,7 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
 }
 
 /* ---------------- Forms (Medical Certificate, etc.) ---------------- */
-function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAddLabRequest, patient, clinicInfo, provider, jumpTo, onJumped, labTemplates, persistLabTemplates, showToast }) {
+function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAddLabRequest, patient, clinicInfo, provider, jumpTo, onJumped, labTemplates, persistLabTemplates, showToast, plans }) {
   const [formType, setFormType] = useState("cert");
   const [autoOpenLabs, setAutoOpenLabs] = useState(false);
 
@@ -2087,7 +2088,7 @@ function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAd
         </button>
       </div>
       {formType === "cert" && (
-        <MedCertSection certs={certs} onAddCertificate={onAddCertificate} patient={patient} clinicInfo={clinicInfo} provider={provider} />
+        <MedCertSection certs={certs} onAddCertificate={onAddCertificate} patient={patient} clinicInfo={clinicInfo} provider={provider} plans={plans} />
       )}
       {formType === "exam" && (
         <PhysicalExamSection exams={exams} onAddExam={onAddExam} patient={patient} clinicInfo={clinicInfo} provider={provider} />
@@ -2110,13 +2111,23 @@ function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAd
   );
 }
 
-function MedCertSection({ certs, onAddCertificate, patient, clinicInfo, provider }) {
+function MedCertSection({ certs, onAddCertificate, patient, clinicInfo, provider, plans }) {
   const [showForm, setShowForm] = useState(false);
   const [examDate, setExamDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [reason, setReason] = useState("");
   const [assessment, setAssessment] = useState("");
   const [recommendation, setRecommendation] = useState("");
   const [printCert, setPrintCert] = useState(null);
+
+  const latestDiagnosis = (plans && plans[0] && plans[0].diagnosis) || "";
+
+  function startAdd() {
+    setExamDate(new Date().toISOString().slice(0, 10));
+    setReason("");
+    setAssessment(latestDiagnosis);
+    setRecommendation("");
+    setShowForm(true);
+  }
 
   function handlePrint(c) {
     setPrintCert(c);
@@ -2132,7 +2143,7 @@ function MedCertSection({ certs, onAddCertificate, patient, clinicInfo, provider
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
-        <button style={styles.primaryBtn} onClick={() => setShowForm((s) => !s)}>
+        <button style={styles.primaryBtn} onClick={() => (showForm ? setShowForm(false) : startAdd())}>
           <Plus size={15} /> New medical certificate
         </button>
       </div>
@@ -2154,6 +2165,11 @@ function MedCertSection({ certs, onAddCertificate, patient, clinicInfo, provider
           <Field label="Assessment / Impression">
             <textarea style={{ ...styles.input, minHeight: 80, fontFamily: "inherit" }} value={assessment} onChange={(e) => setAssessment(e.target.value)} />
           </Field>
+          {latestDiagnosis && assessment === latestDiagnosis && (
+            <div style={{ fontSize: 11, color: "#8A9793", marginTop: -6, marginBottom: 10 }}>
+              Filled in from the most recent treatment plan — edit freely, it won't change the treatment plan itself.
+            </div>
+          )}
           <Field label="Recommendation/s">
             <textarea style={{ ...styles.input, minHeight: 80, fontFamily: "inherit" }} value={recommendation} onChange={(e) => setRecommendation(e.target.value)} />
           </Field>
