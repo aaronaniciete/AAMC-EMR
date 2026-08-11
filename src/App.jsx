@@ -247,21 +247,21 @@ const defaultRxTemplates = () => [
     id: "seed-pcap-ab",
     label: "PCAP A-B",
     meds: [
-      { name: "Cefuroxime 250mg/5mL (Eoroxime)", qty: "1", am: "1.5mL", nn: "0", pm: "1.5mL", remarks: "for 7 days after meals" },
-      { name: "Co-Amoxiclav 312.5mg/5mL", qty: "1", am: "1.5mL", nn: "1.5mL", pm: "1.5mL", remarks: "for 7 days after meals" },
-      { name: "Cefixime 100mg/5mL (Zelpis)", qty: "1", am: "1.5mL", nn: "0", pm: "1.5mL", remarks: "for 7 days after meals" },
-      { name: "N-Acetylcysteine 200mg", qty: "10", am: "1", nn: "0", pm: "1", remarks: "for 5 days" },
-      { name: "Cetirizine 5mg/5mL (Cetzy)", qty: "1", am: "0", nn: "0", pm: "", remarks: "for 7 days" },
-      { name: "Salbutamol nebule + 1mL Sodium Chloride", qty: "15", am: "1", nn: "1", pm: "1", remarks: "for 5 days" },
-      { name: "Prednisolone 20mg/5mL (Medsone)", qty: "1", am: "0", nn: "", pm: "0", remarks: "for 5 days after meals" },
-      { name: "Vitamin C + Zinc (Pediafortan C Plus)", qty: "2", am: "0", nn: "1", pm: "0", remarks: "for 30 days" },
-      { name: "Multivitamins + Iron", qty: "2", am: "0", nn: "", pm: "0", remarks: "for 30 days" },
-      { name: "Paracetamol 250mg/5mL", qty: "1", am: "", nn: "", pm: "", remarks: "every 4 hours for fever or pain" },
-      { name: "Oral Rehydration Salt Solution (Vivalyte)", qty: "9", am: "1", nn: "1", pm: "1", remarks: "consume 3 sachets in a day" },
-      { name: "Guaifenesin + Phenylpropanolamine + Chlorphenamine", qty: "1", am: "2.5mL", nn: "2.5mL", pm: "2.5mL", remarks: "for 7 days" },
-      { name: "Guaifenesin + Salbutamol", qty: "1", am: "5mL", nn: "5mL", pm: "5mL", remarks: "for 5 days" },
-      { name: "Phenylephrine, Brompheniramine Syrup (Congestap)", qty: "1", am: "5mL", nn: "5mL", pm: "5mL", remarks: "for 5 days" },
-      { name: "Dibencozide 3mg (Heraclene Forte)", qty: "90", am: "0", nn: "1", pm: "0", remarks: "for 30 days" },
+      { name: "Cefuroxime 250mg/5mL (Eroxime)", qty: "1", am: "1.5mL", nn: "0", pm: "1.5mL", remarks: "for 7 days after meals", indication: "Antibiotic" },
+      { name: "Co-Amoxiclav 312.5mg/5mL (Colav)", qty: "1", am: "1.5mL", nn: "1.5mL", pm: "1.5mL", remarks: "for 7 days after meals", indication: "Antibiotic" },
+      { name: "Cefixime 100mg/5mL (Zelpis)", qty: "1", am: "1.5mL", nn: "0", pm: "1.5mL", remarks: "for 7 days after meals", indication: "Antibiotic" },
+      { name: "N-Acetylcysteine 200mg", qty: "10", am: "1", nn: "0", pm: "1", remarks: "for 5 days", indication: "Mucolytic (pampatunaw ng plema)" },
+      { name: "Cetirizine 5mg/5mL (Cetzy)", qty: "1", am: "0", nn: "0", pm: "", remarks: "for 7 days", indication: "For colds/allergy" },
+      { name: "Salbutamol nebule + 1mL Sodium Chloride", qty: "15", am: "1", nn: "1", pm: "1", remarks: "for 5 days", indication: "Bronchodilator — for difficulty breathing" },
+      { name: "Prednisolone 20mg/5mL (Medsone)", qty: "1", am: "0", nn: "", pm: "0", remarks: "for 5 days after meals", indication: "Anti-inflammatory" },
+      { name: "Vitamin C + Zinc (Pediafortan C Plus)", qty: "2", am: "0", nn: "1", pm: "0", remarks: "for 30 days", indication: "Supplement — for immune support" },
+      { name: "Multivitamins + Iron", qty: "2", am: "0", nn: "", pm: "0", remarks: "for 30 days", indication: "Supplement" },
+      { name: "Paracetamol 250mg/5mL", qty: "1", am: "", nn: "", pm: "", remarks: "every 4 hours for fever or pain", indication: "For fever or pain" },
+      { name: "Oral Rehydration Salt Solution (Vivalyte)", qty: "9", am: "1", nn: "1", pm: "1", remarks: "consume 3 sachets in a day", indication: "For dehydration" },
+      { name: "Guaifenesin + Phenylpropanolamine + Chlorphenamine", qty: "1", am: "2.5mL", nn: "2.5mL", pm: "2.5mL", remarks: "for 7 days", indication: "For cough, colds & allergy" },
+      { name: "Guaifenesin + Salbutamol", qty: "1", am: "5mL", nn: "5mL", pm: "5mL", remarks: "for 5 days", indication: "For phlegm & difficulty breathing" },
+      { name: "Phenylephrine + Brompheniramine Syrup (Congestap)", qty: "1", am: "5mL", nn: "5mL", pm: "5mL", remarks: "for 5 days", indication: "For colds" },
+      { name: "Dibencozide 3mg (Heraclene Forte)", qty: "90", am: "0", nn: "1", pm: "0", remarks: "for 30 days", indication: "Appetite stimulant" },
     ],
   },
 ];
@@ -490,6 +490,24 @@ function getLatestVitals(history) {
   return result;
 }
 
+// Fills in `indication` on any medication row that's missing it, by matching the row's name
+// against the current medication catalog. Never touches a row that already has an indication
+// (so anything a staff member typed by hand for a specific patient is left alone) — this only
+// closes gaps for rows created before indications existed, or typed in without using a suggestion.
+function backfillRowIndications(rows, medsByName) {
+  let changed = false;
+  const updated = (rows || []).map((row) => {
+    if (row.indication) return row;
+    const match = medsByName.get(row.name);
+    if (match && match.indication) {
+      changed = true;
+      return { ...row, indication: match.indication };
+    }
+    return row;
+  });
+  return { updated, changed };
+}
+
 /* ================================================================== */
 
 export default function ClinicEMR() {
@@ -534,12 +552,35 @@ export default function ClinicEMR() {
         loadRxTemplates(),
         loadLabTemplates(),
       ]);
+
+      // One-time, self-healing merge: fill in `indication` on any existing Rx Template or
+      // prescription rows that don't have one yet, using the medication catalog as the source
+      // of truth. Only writes back to the database if something actually needed filling in.
+      const medsByName = new Map(meds.map((m) => [m.name, m]));
+
+      let templatesChanged = false;
+      const backfilledTemplates = templates.map((tpl) => {
+        const { updated, changed } = backfillRowIndications(tpl.meds, medsByName);
+        if (changed) templatesChanged = true;
+        return changed ? { ...tpl, meds: updated } : tpl;
+      });
+      if (templatesChanged) await saveRxTemplates(backfilledTemplates);
+
+      let prescriptionsChanged = false;
+      const backfilledPrescriptions = (d.prescriptions || []).map((rx) => {
+        const { updated, changed } = backfillRowIndications(rx.meds, medsByName);
+        if (changed) prescriptionsChanged = true;
+        return changed ? { ...rx, meds: updated } : rx;
+      });
+      const finalData = prescriptionsChanged ? { ...d, prescriptions: backfilledPrescriptions } : d;
+      if (prescriptionsChanged) await saveClinicData(finalData);
+
       setMyProfile(profile);
-      setData(d);
+      setData(finalData);
       setClinicInfo(c);
       setStaffList(allStaff);
       setCommonMeds(meds);
-      setRxTemplates(templates);
+      setRxTemplates(backfilledTemplates);
       setLabTemplates(labTpls);
       setDataLoading(false);
     })();
