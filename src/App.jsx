@@ -565,20 +565,37 @@ function formatVitalsForObjective(vitals) {
 
 // Lists the medications from the most recent prescription, used to pre-fill the Plan field
 // when starting a new treatment plan.
-function formatRxForPlan(rxList) {
-  if (!rxList || rxList.length === 0) return "";
-  const latest = rxList[0]; // already sorted newest-first
-  if (!latest.meds || latest.meds.length === 0) return "";
-  return latest.meds
-    .map((m) => {
+// Builds the Plan field's starting text: a "Medications" section from the most recent
+// prescription, and a "Labs and Diagnostics" section from the most recent lab/diagnostic
+// request — each section only appears if there's actually something to show.
+function formatPlanFromRxAndLabs(rxList, labList) {
+  const sections = [];
+
+  const latestRx = rxList && rxList[0];
+  if (latestRx && latestRx.meds && latestRx.meds.length > 0) {
+    const medLines = latestRx.meds.map((m) => {
       const dosing = [m.am, m.nn, m.pm].some(Boolean) ? `AM ${m.am || "0"} · NN ${m.nn || "0"} · PM ${m.pm || "0"}` : "";
       return [
         m.name + (m.indication ? ` (${m.indication})` : ""),
         dosing,
         m.remarks || "",
       ].filter(Boolean).join(" — ");
-    })
-    .join("\n");
+    });
+    sections.push(`Medications\n${medLines.join("\n")}`);
+  }
+
+  const latestLab = labList && labList[0];
+  if (latestLab) {
+    const items = [
+      ...(latestLab.tests || []),
+      ...(latestLab.details || []).map((d) => (d.detail ? `${d.label}: ${d.detail}` : d.label)),
+    ];
+    if (items.length > 0) {
+      sections.push(`Labs and Diagnostics\n${items.join("\n")}`);
+    }
+  }
+
+  return sections.join("\n\n");
 }
 
 // Joins every chart note (newest first, same order as the Chart tab) into one block of text,
@@ -1538,7 +1555,7 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
       </div>
 
       {tab === "chart" && <ChartTab history={history} onAddNote={addNote} onEditNote={editNote} />}
-      {tab === "plans" && <PlansTab plans={plans} onAddPlan={addPlan} onEditPlan={editPlan} onOrderLabs={goOrderLabs} history={history} rx={rx} />}
+      {tab === "plans" && <PlansTab plans={plans} onAddPlan={addPlan} onEditPlan={editPlan} onOrderLabs={goOrderLabs} history={history} rx={rx} labRequests={labRequests} />}
       {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} commonMeds={commonMeds} rxTemplates={rxTemplates} history={history} dosingRules={dosingRules} />}
       {tab === "forms" && (
         <FormsTab
@@ -1695,7 +1712,7 @@ function ChartTab({ history, onAddNote, onEditNote }) {
   );
 }
 
-function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs, history, rx }) {
+function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs, history, rx, labRequests }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [subjective, setSubjective] = useState("");
@@ -1713,7 +1730,7 @@ function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs, history, rx }) {
     setSubjective(formatChartNotesForSubjective(history));
     setObjective(formatVitalsForObjective(getLatestVitals(history)));
     setAssessment("");
-    setPlan(formatRxForPlan(rx));
+    setPlan(formatPlanFromRxAndLabs(rx, labRequests));
     setFollowUp("");
     setEditingId(null);
     setShowForm(true);
@@ -1780,9 +1797,9 @@ function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs, history, rx }) {
           <Field label="P · Plan">
             <textarea style={{ ...styles.input, minHeight: 90, fontFamily: "inherit" }} value={plan} onChange={(e) => setPlan(e.target.value)} placeholder="Interventions, goals, patient education, referrals…" />
           </Field>
-          {plan && plan === formatRxForPlan(rx) && (
+          {plan && plan === formatPlanFromRxAndLabs(rx, labRequests) && (
             <div style={{ fontSize: 11, color: "#8A9793", marginTop: -6, marginBottom: 10 }}>
-              Filled in from the most recent prescription — add anything else and edit freely.
+              Filled in from the most recent prescription and lab/diagnostic request — add anything else and edit freely.
             </div>
           )}
           <Field label="Follow-up">
