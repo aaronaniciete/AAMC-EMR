@@ -1566,7 +1566,7 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
   function pickSuggestion(i, med) {
     const slots = deriveDoseSlots(med.frequency, med.dosage);
     const remarks = buildRemarks(med.duration, med.notes);
-    setMeds((m) => m.map((row, idx) => (idx === i ? { ...row, name: med.name, am: slots.am, nn: slots.nn, pm: slots.pm, remarks } : row)));
+    setMeds((m) => m.map((row, idx) => (idx === i ? { ...row, name: med.name, am: slots.am, nn: slots.nn, pm: slots.pm, remarks, indication: med.indication || row.indication } : row)));
     setOpenSuggestRow(null);
   }
 
@@ -1653,7 +1653,9 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
                             style={styles.suggestItem}
                             onMouseDown={() => pickSuggestion(i, m)}
                           >
-                            <div style={{ fontWeight: 600, fontSize: 13 }}>{m.name}</div>
+                            <div style={{ fontWeight: 600, fontSize: 13 }}>
+                              {m.name}{m.indication ? <span style={{ fontWeight: 400, color: "#0F5E56" }}> · {m.indication}</span> : ""}
+                            </div>
                             <div style={{ fontSize: 11.5, color: "#5B6B68" }}>
                               {m.dosage} · {m.frequency} · {m.duration}
                             </div>
@@ -2804,12 +2806,13 @@ function MedicationsPage({ commonMeds, persistCommonMeds, showToast }) {
   const [frequency, setFrequency] = useState("");
   const [duration, setDuration] = useState("");
   const [notes, setNotes] = useState("");
+  const [indication, setIndication] = useState("");
 
   const list = commonMeds;
   const filtered = list.filter((m) => m.name.toLowerCase().includes(query.toLowerCase()));
 
   function resetForm() {
-    setName(""); setDosage(""); setFrequency(""); setDuration(""); setNotes("");
+    setName(""); setDosage(""); setFrequency(""); setDuration(""); setNotes(""); setIndication("");
     setEditingIndex(null); setShowForm(false);
   }
 
@@ -2820,14 +2823,14 @@ function MedicationsPage({ commonMeds, persistCommonMeds, showToast }) {
 
   function startEdit(idx) {
     const m = list[idx];
-    setName(m.name); setDosage(m.dosage); setFrequency(m.frequency); setDuration(m.duration); setNotes(m.notes || "");
+    setName(m.name); setDosage(m.dosage); setFrequency(m.frequency); setDuration(m.duration); setNotes(m.notes || ""); setIndication(m.indication || "");
     setEditingIndex(idx);
     setShowForm(true);
   }
 
   async function saveMed() {
     if (!name.trim()) return;
-    const entry = { name: name.trim(), dosage: dosage.trim(), frequency: frequency.trim(), duration: duration.trim(), notes: notes.trim() };
+    const entry = { name: name.trim(), dosage: dosage.trim(), frequency: frequency.trim(), duration: duration.trim(), notes: notes.trim(), indication: indication.trim() };
     const nextList = editingIndex === null ? [...list, entry] : list.map((m, i) => (i === editingIndex ? entry : m));
     await persistCommonMeds(nextList);
     showToast(editingIndex === null ? "Medication added" : "Medication updated");
@@ -2869,6 +2872,9 @@ function MedicationsPage({ commonMeds, persistCommonMeds, showToast }) {
           <Field label="Medication name">
             <input style={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Amoxicillin 500mg (Brand)" />
           </Field>
+          <Field label="Indication (optional)">
+            <input style={styles.input} value={indication} onChange={(e) => setIndication(e.target.value)} placeholder="e.g. Antibiotics, for cough, for fever" />
+          </Field>
           <div style={{ display: "flex", gap: 10 }}>
             <Field label="Dosage" style={{ flex: 1 }}>
               <input style={styles.input} value={dosage} onChange={(e) => setDosage(e.target.value)} placeholder="e.g. 1 tab" />
@@ -2902,7 +2908,9 @@ function MedicationsPage({ commonMeds, persistCommonMeds, showToast }) {
               return (
                 <div key={m.name + idx} style={styles.patientRow}>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, color: "#12312D" }}>{m.name}</div>
+                    <div style={{ fontWeight: 600, color: "#12312D" }}>
+                      {m.name}{m.indication ? <span style={{ fontWeight: 400, color: "#0F5E56" }}> · {m.indication}</span> : ""}
+                    </div>
                     <div style={{ fontSize: 12, color: "#5B6B68" }}>
                       {[m.dosage, m.frequency, m.duration, m.notes].filter(Boolean).join(" · ")}
                     </div>
@@ -2961,7 +2969,7 @@ function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, showToas
   function pickSuggestion(i, med) {
     const slots = deriveDoseSlots(med.frequency, med.dosage);
     const remarks = buildRemarks(med.duration, med.notes);
-    setMeds((m) => m.map((row, idx) => (idx === i ? { ...row, name: med.name, am: slots.am, nn: slots.nn, pm: slots.pm, remarks } : row)));
+    setMeds((m) => m.map((row, idx) => (idx === i ? { ...row, name: med.name, am: slots.am, nn: slots.nn, pm: slots.pm, remarks, indication: med.indication || row.indication } : row)));
     setOpenSuggestRow(null);
   }
 
@@ -3027,7 +3035,9 @@ function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, showToas
                       <div style={styles.suggestBox}>
                         {suggestions.map((m) => (
                           <div key={m.name} style={styles.suggestItem} onMouseDown={() => pickSuggestion(i, m)}>
-                            <div style={{ fontWeight: 600, fontSize: 13 }}>{m.name}</div>
+                            <div style={{ fontWeight: 600, fontSize: 13 }}>
+                              {m.name}{m.indication ? <span style={{ fontWeight: 400, color: "#0F5E56" }}> · {m.indication}</span> : ""}
+                            </div>
                             <div style={{ fontSize: 11.5, color: "#5B6B68" }}>{m.dosage} · {m.frequency} · {m.duration}</div>
                           </div>
                         ))}
