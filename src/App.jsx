@@ -511,6 +511,14 @@ const defaultDosingRules = () => [
   { id: "rule-prednisolone", drugMatch: "Prednisolone", mgPerKgPerDay: null, everyHours: null },
 ];
 
+// Roles allowed to add/edit/delete prescriptions, medications, and Rx Templates. This is a
+// UI-level restriction (hides the controls), not a database-enforced one — see the note where
+// it's used. Pediatrician is included alongside Physician since both are prescribing clinicians.
+const CLINICAL_EDIT_ROLES = ["Nurse", "Physician", "Pediatrician"];
+function canEditClinical(role) {
+  return CLINICAL_EDIT_ROLES.includes(role);
+}
+
 function dosesPerDayFor(everyHours) {
   return everyHours ? Math.max(1, Math.round(24 / everyHours)) : null;
 }
@@ -864,6 +872,7 @@ export default function ClinicEMR() {
               dosingRules={dosingRules}
               persistDosingRules={persistDosingRules}
               showToast={showToast}
+              userRole={currentUser.role}
             />
           )}
           {view === "templates" && (
@@ -873,6 +882,7 @@ export default function ClinicEMR() {
               commonMeds={commonMeds}
               dosingRules={dosingRules}
               showToast={showToast}
+              userRole={currentUser.role}
             />
           )}
           {view === "staff" && (
@@ -1556,7 +1566,7 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
 
       {tab === "chart" && <ChartTab history={history} onAddNote={addNote} onEditNote={editNote} />}
       {tab === "plans" && <PlansTab plans={plans} onAddPlan={addPlan} onEditPlan={editPlan} onOrderLabs={goOrderLabs} history={history} rx={rx} labRequests={labRequests} />}
-      {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} commonMeds={commonMeds} rxTemplates={rxTemplates} history={history} dosingRules={dosingRules} />}
+      {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} commonMeds={commonMeds} rxTemplates={rxTemplates} history={history} dosingRules={dosingRules} userRole={currentUser.role} />}
       {tab === "forms" && (
         <FormsTab
           certs={certs}
@@ -1849,7 +1859,7 @@ function SoapLine({ label, text, bold }) {
   );
 }
 
-function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds, rxTemplates, history, dosingRules }) {
+function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds, rxTemplates, history, dosingRules, userRole }) {
   const [showForm, setShowForm] = useState(false);
   const [meds, setMeds] = useState([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "", indication: "" }]);
   const [notes, setNotes] = useState("");
@@ -1901,11 +1911,15 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
-        <button style={styles.primaryBtn} onClick={() => setShowForm((s) => !s)}>
-          <Plus size={15} /> New prescription
-        </button>
+        {canEditClinical(userRole) ? (
+          <button style={styles.primaryBtn} onClick={() => setShowForm((s) => !s)}>
+            <Plus size={15} /> New prescription
+          </button>
+        ) : (
+          <div style={{ fontSize: 12, color: "#8A9793" }}>Only nurses and physicians can create prescriptions.</div>
+        )}
       </div>
-      {showForm && (
+      {showForm && canEditClinical(userRole) && (
         <div style={styles.card}>
           {templateList.length > 0 && (
             <div style={{ marginBottom: 14 }}>
@@ -3156,7 +3170,7 @@ function detailChecked(detailMap, label) {
 }
 
 /* ---------------- Medications (editable, shared across the clinic) ---------------- */
-function MedicationsPage({ commonMeds, persistCommonMeds, dosingRules, persistDosingRules, showToast }) {
+function MedicationsPage({ commonMeds, persistCommonMeds, dosingRules, persistDosingRules, showToast, userRole }) {
   const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editingIndex, setEditingIndex] = useState(null);
@@ -3202,15 +3216,20 @@ function MedicationsPage({ commonMeds, persistCommonMeds, dosingRules, persistDo
     showToast("Medication removed");
   }
 
+  const canEdit = canEditClinical(userRole);
+
   return (
     <div>
       <div style={styles.pageHeader}>
         <h2 style={styles.h2}>Medications</h2>
-        <button style={styles.primaryBtn} onClick={startAdd}><Plus size={15} /> Add medication</button>
+        {canEdit && (
+          <button style={styles.primaryBtn} onClick={startAdd}><Plus size={15} /> Add medication</button>
+        )}
       </div>
       <div style={{ fontSize: 12.5, color: "#5B6B68", marginBottom: 14 }}>
         One shared list for every prescription — adult and pediatric medications together. Pick whichever's
         right for the patient in front of you when writing a prescription.
+        {!canEdit && " Only nurses and physicians can add or edit entries here."}
       </div>
 
       <div style={{ position: "relative", marginBottom: 14 }}>
@@ -3223,7 +3242,7 @@ function MedicationsPage({ commonMeds, persistCommonMeds, dosingRules, persistDo
         />
       </div>
 
-      {showForm && (
+      {showForm && canEdit && (
         <div style={styles.card}>
           <div style={{ fontSize: 11.5, color: "#5B6B68", marginBottom: 10 }}>
             This is what shows up as a suggestion when staff type a medication name into any patient's prescription.
@@ -3274,8 +3293,12 @@ function MedicationsPage({ commonMeds, persistCommonMeds, dosingRules, persistDo
                       {[m.dosage, m.frequency, m.duration, m.notes].filter(Boolean).join(" · ")}
                     </div>
                   </div>
-                  <button style={styles.iconBtn} onClick={() => startEdit(idx)} aria-label="Edit"><Pencil size={14} /></button>
-                  <button style={styles.iconBtn} onClick={() => removeMed(idx)} aria-label="Remove"><Trash2 size={14} /></button>
+                  {canEdit && (
+                    <>
+                      <button style={styles.iconBtn} onClick={() => startEdit(idx)} aria-label="Edit"><Pencil size={14} /></button>
+                      <button style={styles.iconBtn} onClick={() => removeMed(idx)} aria-label="Remove"><Trash2 size={14} /></button>
+                    </>
+                  )}
                 </div>
               );
             })}
@@ -3283,17 +3306,18 @@ function MedicationsPage({ commonMeds, persistCommonMeds, dosingRules, persistDo
         )}
       </SectionCard>
 
-      <DosingRulesSection dosingRules={dosingRules} persistDosingRules={persistDosingRules} showToast={showToast} />
+      <DosingRulesSection dosingRules={dosingRules} persistDosingRules={persistDosingRules} showToast={showToast} userRole={userRole} />
     </div>
   );
 }
 
-function DosingRulesSection({ dosingRules, persistDosingRules, showToast }) {
+function DosingRulesSection({ dosingRules, persistDosingRules, showToast, userRole }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [drugMatch, setDrugMatch] = useState("");
   const [mgPerKgPerDay, setMgPerKgPerDay] = useState("");
   const [everyHours, setEveryHours] = useState("");
+  const canEdit = canEditClinical(userRole);
 
   function resetForm() {
     setDrugMatch(""); setMgPerKgPerDay(""); setEveryHours("");
@@ -3336,7 +3360,9 @@ function DosingRulesSection({ dosingRules, persistDosingRules, showToast }) {
     <div>
       <div style={{ ...styles.pageHeader, marginTop: 28 }}>
         <h2 style={{ ...styles.h2, fontSize: 18 }}>Weight-based dosing rules</h2>
-        <button style={styles.primaryBtn} onClick={startAdd}><Plus size={15} /> New dosing rule</button>
+        {canEdit && (
+          <button style={styles.primaryBtn} onClick={startAdd}><Plus size={15} /> New dosing rule</button>
+        )}
       </div>
       <div style={{ fontSize: 12.5, color: "#5B6B68", marginBottom: 14 }}>
         Applies only to liquid/syrup formulations whose name matches — e.g. "Cefixime" matches
@@ -3344,7 +3370,7 @@ function DosingRulesSection({ dosingRules, persistDosingRules, showToast }) {
         patient in prescriptions, based on their recorded weight.
       </div>
 
-      {showForm && (
+      {showForm && canEdit && (
         <div style={styles.card}>
           <Field label="Medication name contains">
             <input style={styles.input} value={drugMatch} onChange={(e) => setDrugMatch(e.target.value)} placeholder="e.g. Cefixime" />
@@ -3379,8 +3405,12 @@ function DosingRulesSection({ dosingRules, persistDosingRules, showToast }) {
                     <div style={{ fontWeight: 600, color: "#12312D" }}>{r.drugMatch}</div>
                     <div style={{ fontSize: 12, color: isSet ? "#5B6B68" : "#B23B3B" }}>{dosingRuleLabel(r)}</div>
                   </div>
-                  <button style={styles.iconBtn} onClick={() => startEdit(r)} aria-label="Edit"><Pencil size={14} /></button>
-                  <button style={styles.iconBtn} onClick={() => removeRule(r.id)} aria-label="Remove"><Trash2 size={14} /></button>
+                  {canEdit && (
+                    <>
+                      <button style={styles.iconBtn} onClick={() => startEdit(r)} aria-label="Edit"><Pencil size={14} /></button>
+                      <button style={styles.iconBtn} onClick={() => removeRule(r.id)} aria-label="Remove"><Trash2 size={14} /></button>
+                    </>
+                  )}
                 </div>
               );
             })}
@@ -3392,12 +3422,13 @@ function DosingRulesSection({ dosingRules, persistDosingRules, showToast }) {
 }
 
 /* ---------------- Rx Templates (diagnosis bundles) ---------------- */
-function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, dosingRules, showToast }) {
+function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, dosingRules, showToast, userRole }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [label, setLabel] = useState("");
   const [meds, setMeds] = useState([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "", indication: "" }]);
   const [openSuggestRow, setOpenSuggestRow] = useState(null);
+  const canEdit = canEditClinical(userRole);
 
   const list = rxTemplates;
   const medList = commonMeds;
@@ -3457,15 +3488,18 @@ function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, dosingRu
     <div>
       <div style={styles.pageHeader}>
         <h2 style={styles.h2}>Rx Templates</h2>
-        <button style={styles.primaryBtn} onClick={startAdd}><Plus size={15} /> New template</button>
+        {canEdit && (
+          <button style={styles.primaryBtn} onClick={startAdd}><Plus size={15} /> New template</button>
+        )}
       </div>
       <div style={{ fontSize: 12.5, color: "#5B6B68", marginBottom: 14 }}>
         Save a diagnosis as a bundle of medications (like "PCAP A-B" or "URTI") so a whole prescription
         fills in with one click instead of adding each drug by hand. One shared list — pick whichever
         template fits the patient in front of you.
+        {!canEdit && " Only nurses and physicians can add or edit templates."}
       </div>
 
-      {showForm && (
+      {showForm && canEdit && (
         <div style={styles.card}>
           <Field label="Diagnosis / template name">
             <input style={styles.input} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. PCAP A-B, URTI, Bronchitis" />
@@ -3556,8 +3590,12 @@ function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, dosingRu
                   <div style={{ fontWeight: 600, color: "#12312D" }}>{tpl.label}</div>
                   <div style={{ fontSize: 12, color: "#5B6B68" }}>{tpl.meds.length} medications</div>
                 </div>
-                <button style={styles.iconBtn} onClick={() => startEdit(tpl)} aria-label="Edit"><Pencil size={14} /></button>
-                <button style={styles.iconBtn} onClick={() => removeTemplate(tpl.id)} aria-label="Remove"><Trash2 size={14} /></button>
+                {canEdit && (
+                  <>
+                    <button style={styles.iconBtn} onClick={() => startEdit(tpl)} aria-label="Edit"><Pencil size={14} /></button>
+                    <button style={styles.iconBtn} onClick={() => removeTemplate(tpl.id)} aria-label="Remove"><Trash2 size={14} /></button>
+                  </>
+                )}
               </div>
             ))}
           </div>
