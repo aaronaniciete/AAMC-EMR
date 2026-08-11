@@ -486,7 +486,7 @@ const WEIGHT_DOSING_RULES = [
     match: (name) => /co-amoxiclav/i.test(name) && /mg\s*\/\s*5\s*mL/i.test(name),
     mgPerKgPerDay: 50,
     dosesPerDay: 3,
-    label: "50 mg/kg/day ÷ 3 doses (every 8 hours)",
+    label: "40 mg/kg/day ÷ 3 doses (every 8 hours)",
   },
 ];
 
