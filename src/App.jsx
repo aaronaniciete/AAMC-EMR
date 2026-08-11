@@ -550,6 +550,16 @@ function computeWeightDose(medName, weightKg, rule) {
   };
 }
 
+// Joins every chart note (newest first, same order as the Chart tab) into one block of text,
+// used to pre-fill the Subjective field when starting a new treatment plan.
+function formatChartNotesForSubjective(history) {
+  if (!history || history.length === 0) return "";
+  return history
+    .filter((h) => h.note)
+    .map((h) => `[${fmtDateTime(h.date)}] ${h.note}`)
+    .join("\n\n");
+}
+
 function getLatestVitals(history) {
   const result = { weight: "", bp: "", heartRate: "", temp: "" };
   for (const h of history || []) {
@@ -1401,13 +1411,13 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
 
   async function addPlan(plan) {
     const treatmentPlans = [...data.treatmentPlans, { ...plan, id: uid("plan"), patientId: patient.id, date: new Date().toISOString(), provider: currentUser.name }];
-    await persist(withAudit({ ...data, treatmentPlans }, "treatment_plan_added", plan.diagnosis ? `Treatment plan: ${plan.diagnosis}` : "Added a treatment plan"));
+    await persist(withAudit({ ...data, treatmentPlans }, "treatment_plan_added", plan.assessment ? `Treatment plan: ${plan.assessment}` : "Added a treatment plan"));
     showToast("Treatment plan saved");
   }
 
   async function editPlan(planId, updates) {
     const treatmentPlans = data.treatmentPlans.map((t) => (t.id === planId ? { ...t, ...updates } : t));
-    await persist(withAudit({ ...data, treatmentPlans }, "treatment_plan_edited", updates.diagnosis ? `Treatment plan edited: ${updates.diagnosis}` : "Edited a treatment plan"));
+    await persist(withAudit({ ...data, treatmentPlans }, "treatment_plan_edited", updates.assessment ? `Treatment plan edited: ${updates.assessment}` : "Edited a treatment plan"));
     showToast("Treatment plan updated");
   }
 
@@ -1497,7 +1507,7 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
       </div>
 
       {tab === "chart" && <ChartTab history={history} onAddNote={addNote} onEditNote={editNote} />}
-      {tab === "plans" && <PlansTab plans={plans} onAddPlan={addPlan} onEditPlan={editPlan} onOrderLabs={goOrderLabs} />}
+      {tab === "plans" && <PlansTab plans={plans} onAddPlan={addPlan} onEditPlan={editPlan} onOrderLabs={goOrderLabs} history={history} />}
       {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} commonMeds={commonMeds} rxTemplates={rxTemplates} history={history} dosingRules={dosingRules} />}
       {tab === "forms" && (
         <FormsTab
@@ -1654,25 +1664,34 @@ function ChartTab({ history, onAddNote, onEditNote }) {
   );
 }
 
-function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs }) {
+function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs, history }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [diagnosis, setDiagnosis] = useState("");
+  const [subjective, setSubjective] = useState("");
+  const [objective, setObjective] = useState("");
+  const [assessment, setAssessment] = useState("");
   const [plan, setPlan] = useState("");
   const [followUp, setFollowUp] = useState("");
 
   function resetForm() {
-    setDiagnosis(""); setPlan(""); setFollowUp("");
+    setSubjective(""); setObjective(""); setAssessment(""); setPlan(""); setFollowUp("");
     setEditingId(null); setShowForm(false);
   }
 
   function startAdd() {
-    resetForm();
+    setSubjective(formatChartNotesForSubjective(history));
+    setObjective("");
+    setAssessment("");
+    setPlan("");
+    setFollowUp("");
+    setEditingId(null);
     setShowForm(true);
   }
 
   function startEdit(p) {
-    setDiagnosis(p.diagnosis || "");
+    setSubjective(p.subjective || "");
+    setObjective(p.objective || "");
+    setAssessment(p.assessment || p.diagnosis || ""); // p.diagnosis covers plans saved before S/O were added
     setPlan(p.plan || "");
     setFollowUp(p.followUp || "");
     setEditingId(p.id);
@@ -1681,7 +1700,13 @@ function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs }) {
 
   function save() {
     if (!plan.trim()) return;
-    const payload = { diagnosis: diagnosis.trim(), plan: plan.trim(), followUp: followUp.trim() };
+    const payload = {
+      subjective: subjective.trim(),
+      objective: objective.trim(),
+      assessment: assessment.trim(),
+      plan: plan.trim(),
+      followUp: followUp.trim(),
+    };
     if (editingId) {
       onEditPlan(editingId, payload);
     } else {
@@ -1702,10 +1727,21 @@ function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs }) {
       </div>
       {showForm && (
         <div style={styles.card}>
-          <Field label="Diagnosis / assessment">
-            <input style={styles.input} value={diagnosis} onChange={(e) => setDiagnosis(e.target.value)} />
+          <Field label="S · Subjective">
+            <textarea style={{ ...styles.input, minHeight: 80, fontFamily: "inherit" }} value={subjective} onChange={(e) => setSubjective(e.target.value)} placeholder="What the patient reports — symptoms, complaints, history" />
           </Field>
-          <Field label="Plan">
+          {history && history.length > 0 && (
+            <div style={{ fontSize: 11, color: "#8A9793", marginTop: -6, marginBottom: 10 }}>
+              Filled in from this patient's chart notes — edit or trim freely.
+            </div>
+          )}
+          <Field label="O · Objective">
+            <textarea style={{ ...styles.input, minHeight: 70, fontFamily: "inherit" }} value={objective} onChange={(e) => setObjective(e.target.value)} placeholder="Measurable findings — vitals, exam findings, results" />
+          </Field>
+          <Field label="A · Assessment">
+            <textarea style={{ ...styles.input, minHeight: 60, fontFamily: "inherit" }} value={assessment} onChange={(e) => setAssessment(e.target.value)} placeholder="Diagnosis or clinical impression" />
+          </Field>
+          <Field label="P · Plan">
             <textarea style={{ ...styles.input, minHeight: 90, fontFamily: "inherit" }} value={plan} onChange={(e) => setPlan(e.target.value)} placeholder="Interventions, goals, patient education, referrals…" />
           </Field>
           <Field label="Follow-up">
@@ -1732,14 +1768,25 @@ function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs }) {
                   <div style={styles.entryDate}>{fmtDateTime(p.date)} · {p.provider}</div>
                   <button style={styles.linkBtn} onClick={() => startEdit(p)}><Pencil size={12} /> Edit</button>
                 </div>
-                {p.diagnosis && <div style={{ fontWeight: 600, fontSize: 13.5, color: "#12312D", marginBottom: 3 }}>{p.diagnosis}</div>}
-                <div style={{ fontSize: 13.5, color: "#2A3B38", whiteSpace: "pre-wrap" }}>{p.plan}</div>
+                {p.subjective && <SoapLine label="S" text={p.subjective} />}
+                {p.objective && <SoapLine label="O" text={p.objective} />}
+                {(p.assessment || p.diagnosis) && <SoapLine label="A" text={p.assessment || p.diagnosis} bold />}
+                <SoapLine label="P" text={p.plan} />
                 {p.followUp && <div style={{ fontSize: 12, color: "#5B6B68", marginTop: 4 }}>Follow-up: {p.followUp}</div>}
               </div>
             ))}
           </div>
         )}
       </SectionCard>
+    </div>
+  );
+}
+
+function SoapLine({ label, text, bold }) {
+  return (
+    <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "flex-start" }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: "#0F5E56", width: 14, flexShrink: 0, marginTop: 1 }}>{label}</span>
+      <span style={{ fontSize: 13.5, color: bold ? "#12312D" : "#2A3B38", fontWeight: bold ? 600 : 400, whiteSpace: "pre-wrap" }}>{text}</span>
     </div>
   );
 }
@@ -2119,7 +2166,7 @@ function MedCertSection({ certs, onAddCertificate, patient, clinicInfo, provider
   const [recommendation, setRecommendation] = useState("");
   const [printCert, setPrintCert] = useState(null);
 
-  const latestDiagnosis = (plans && plans[0] && plans[0].diagnosis) || "";
+  const latestDiagnosis = (plans && plans[0] && (plans[0].assessment || plans[0].diagnosis)) || "";
 
   function startAdd() {
     setExamDate(new Date().toISOString().slice(0, 10));
