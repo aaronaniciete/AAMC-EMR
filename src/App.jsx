@@ -1264,7 +1264,7 @@ function TopBar({ currentUser }) {
   return (
     <div style={styles.topBar}>
       <div style={{ fontFamily: "Fraunces, serif", fontSize: 20, color: "#12312D" }}>
-        Medicalamp;Clinic
+        Medical amp;Clinic
       </div>
       <div style={{ fontSize: 12.5, color: "#5B6B68", fontFamily: "IBM Plex Mono, monospace" }}>
         {today.toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
