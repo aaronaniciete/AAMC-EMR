@@ -466,6 +466,21 @@ async function saveDosingRules(rules) {
   if (error) console.error("saveDosingRules failed", error);
 }
 
+// A short notice shown on the public booking website (e.g. "Closed this Saturday for a
+// holiday"). Stored the same way as clinic info, but also readable by the public site itself —
+// see the extra RLS policy in schema-notice.sql.
+const defaultScheduleNotice = () => ({ message: "", active: false });
+async function loadScheduleNotice() {
+  const { data, error } = await supabase.from("app_state").select("value").eq("key", "schedule-notice").maybeSingle();
+  if (error) { console.error("loadScheduleNotice failed", error); return defaultScheduleNotice(); }
+  if (!data) return defaultScheduleNotice();
+  return { ...defaultScheduleNotice(), ...data.value };
+}
+async function saveScheduleNotice(notice) {
+  const { error } = await supabase.from("app_state").upsert({ key: "schedule-notice", value: notice, updated_at: new Date().toISOString() });
+  if (error) console.error("saveScheduleNotice failed", error);
+}
+
 // Online booking requests from the public website — stored in their own table (not app_state)
 // since the public site needs to INSERT into it without ever being able to read other patients'
 // data back. See schema-booking.sql.
@@ -696,6 +711,7 @@ export default function ClinicEMR() {
   const [labTemplates, setLabTemplates] = useState(defaultLabTemplates());
   const [dosingRules, setDosingRules] = useState(defaultDosingRules());
   const [pendingRegistrations, setPendingRegistrations] = useState([]);
+  const [scheduleNotice, setScheduleNotice] = useState(defaultScheduleNotice());
   const [view, setView] = useState("dashboard");
   const [selectedPatientId, setSelectedPatientId] = useState(null);
   const [toast, setToast] = useState(null);
@@ -718,7 +734,7 @@ export default function ClinicEMR() {
     if (!userId) { setMyProfile(null); return; }
     (async () => {
       setDataLoading(true);
-      const [profile, d, c, allStaff, meds, templates, labTpls, dRules, pendingRegs] = await Promise.all([
+      const [profile, d, c, allStaff, meds, templates, labTpls, dRules, pendingRegs, notice] = await Promise.all([
         loadMyProfile(userId),
         loadClinicData(),
         loadClinicInfo(),
@@ -728,6 +744,7 @@ export default function ClinicEMR() {
         loadLabTemplates(),
         loadDosingRules(),
         loadPendingRegistrations(),
+        loadScheduleNotice(),
       ]);
 
       // One-time, self-healing merge: fill in `indication` on any existing Rx Template or
@@ -761,6 +778,7 @@ export default function ClinicEMR() {
       setLabTemplates(labTpls);
       setDosingRules(dRules);
       setPendingRegistrations(pendingRegs);
+      setScheduleNotice(notice);
       setDataLoading(false);
     })();
   }, [userId]);
@@ -788,6 +806,11 @@ export default function ClinicEMR() {
   const persistDosingRules = useCallback(async (next) => {
     setDosingRules(next);
     await saveDosingRules(next);
+  }, []);
+
+  const persistScheduleNotice = useCallback(async (next) => {
+    setScheduleNotice(next);
+    await saveScheduleNotice(next);
   }, []);
 
   async function handleApproveRegistration(registration) {
@@ -986,6 +1009,8 @@ export default function ClinicEMR() {
               showToast={showToast}
               clinicInfo={clinicInfo}
               persistClinicInfo={persistClinicInfo}
+              scheduleNotice={scheduleNotice}
+              persistScheduleNotice={persistScheduleNotice}
             />
           )}
         </div>
@@ -3994,16 +4019,26 @@ function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, dosingRu
 }
 
 /* ---------------- Staff directory (read-only list; logins are managed in Supabase) ---------------- */
-function StaffDirectory({ staffList, showToast, clinicInfo, persistClinicInfo }) {
+function StaffDirectory({ staffList, showToast, clinicInfo, persistClinicInfo, scheduleNotice, persistScheduleNotice }) {
   const [editingClinic, setEditingClinic] = useState(false);
   const [clinicName, setClinicName] = useState(clinicInfo.name);
   const [clinicAddress, setClinicAddress] = useState(clinicInfo.address);
   const [clinicPhone, setClinicPhone] = useState(clinicInfo.phone);
 
+  const [editingNotice, setEditingNotice] = useState(false);
+  const [noticeMessage, setNoticeMessage] = useState(scheduleNotice.message);
+  const [noticeActive, setNoticeActive] = useState(scheduleNotice.active);
+
   async function saveClinic() {
     await persistClinicInfo({ name: clinicName.trim(), address: clinicAddress.trim(), phone: clinicPhone.trim() });
     showToast("Clinic info updated");
     setEditingClinic(false);
+  }
+
+  async function saveNotice() {
+    await persistScheduleNotice({ message: noticeMessage.trim(), active: noticeActive });
+    showToast("Booking page notice updated");
+    setEditingNotice(false);
   }
 
   return (
@@ -4050,6 +4085,55 @@ function StaffDirectory({ staffList, showToast, clinicInfo, persistClinicInfo })
             <div>{clinicInfo.address}</div>
             <div>{clinicInfo.phone}</div>
           </div>
+        )}
+      </SectionCard>
+
+      <SectionCard
+        title="Booking page notice"
+        action={
+          !editingNotice && (
+            <button style={styles.linkBtn} onClick={() => setEditingNotice(true)}>Edit</button>
+          )
+        }
+      >
+        {editingNotice ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ fontSize: 11.5, color: "#5B6B68" }}>
+              Shows as a banner at the top of the online booking page — for things like a holiday
+              closure or a temporary schedule change. Updates immediately, no redeploy needed.
+            </div>
+            <Field label="Notice text">
+              <textarea
+                style={{ ...styles.input, minHeight: 70, fontFamily: "inherit" }}
+                value={noticeMessage}
+                onChange={(e) => setNoticeMessage(e.target.value)}
+                placeholder="e.g. Closed this Saturday, Aug 16 — back to normal hours Monday."
+              />
+            </Field>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#12312D" }}>
+              <input type="checkbox" checked={noticeActive} onChange={(e) => setNoticeActive(e.target.checked)} />
+              Show this notice on the booking page
+            </label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button style={{ ...styles.primaryBtn, justifyContent: "center" }} onClick={saveNotice}><Check size={15} /> Save</button>
+              <button
+                style={{ ...styles.linkBtn, padding: "9px 14px" }}
+                onClick={() => {
+                  setNoticeMessage(scheduleNotice.message); setNoticeActive(scheduleNotice.active);
+                  setEditingNotice(false);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : scheduleNotice.active && scheduleNotice.message ? (
+          <div style={{ fontSize: 13.5, color: "#12312D", lineHeight: 1.6 }}>
+            <span style={{ ...styles.pill, background: "#EAF3F1", color: "#0F5E56", marginRight: 8 }}>Live on booking page</span>
+            {scheduleNotice.message}
+          </div>
+        ) : (
+          <EmptyState text="No notice showing on the booking page right now." />
         )}
       </SectionCard>
 
