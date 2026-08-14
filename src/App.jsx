@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   CalendarDays, Users, Stethoscope, Pill, Home, Search, Plus, X,
   Baby, UserRound, AlertTriangle, ChevronLeft, Clock, FileText,
@@ -808,6 +808,39 @@ export default function ClinicEMR() {
     await saveDosingRules(next);
   }, []);
 
+  function exportClinicalData() {
+    const bundle = {
+      exportedAt: new Date().toISOString(),
+      exportedFrom: clinicInfo.name,
+      commonMeds,
+      rxTemplates,
+      dosingRules,
+    };
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `clinic-reference-data-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function importClinicalData(file) {
+    try {
+      const text = await file.text();
+      const bundle = JSON.parse(text);
+      if (Array.isArray(bundle.commonMeds)) await persistCommonMeds(bundle.commonMeds);
+      if (Array.isArray(bundle.rxTemplates)) await persistRxTemplates(bundle.rxTemplates);
+      if (Array.isArray(bundle.dosingRules)) await persistDosingRules(bundle.dosingRules);
+      showToast("Reference data imported — medications, Rx Templates, and dosing rules replaced");
+    } catch (e) {
+      console.error("importClinicalData failed", e);
+      showToast("Couldn't read that file — make sure it's an export from this app");
+    }
+  }
+
   const persistScheduleNotice = useCallback(async (next) => {
     setScheduleNotice(next);
     await saveScheduleNotice(next);
@@ -991,6 +1024,8 @@ export default function ClinicEMR() {
               persistDosingRules={persistDosingRules}
               showToast={showToast}
               userRole={currentUser.role}
+              onExportData={exportClinicalData}
+              onImportData={importClinicalData}
             />
           )}
           {view === "templates" && (
@@ -1264,7 +1299,7 @@ function TopBar({ currentUser }) {
   return (
     <div style={styles.topBar}>
       <div style={{ fontFamily: "Fraunces, serif", fontSize: 20, color: "#12312D" }}>
-        Medical Clinic
+        Adult &amp; Pediatric Care
       </div>
       <div style={{ fontSize: 12.5, color: "#5B6B68", fontFamily: "IBM Plex Mono, monospace" }}>
         {today.toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
@@ -3583,7 +3618,7 @@ function RegistrationsPage({ registrations, onApprove, onReject }) {
   );
 }
 
-function MedicationsPage({ commonMeds, persistCommonMeds, dosingRules, persistDosingRules, showToast, userRole }) {
+function MedicationsPage({ commonMeds, persistCommonMeds, dosingRules, persistDosingRules, showToast, userRole, onExportData, onImportData }) {
   const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editingIndex, setEditingIndex] = useState(null);
@@ -3630,6 +3665,7 @@ function MedicationsPage({ commonMeds, persistCommonMeds, dosingRules, persistDo
   }
 
   const canEdit = canEditClinical(userRole);
+  const importInputRef = useRef(null);
 
   return (
     <div>
@@ -3643,6 +3679,39 @@ function MedicationsPage({ commonMeds, persistCommonMeds, dosingRules, persistDo
         One shared list for every prescription — adult and pediatric medications together. Pick whichever's
         right for the patient in front of you when writing a prescription.
         {!canEdit && " Only nurses and physicians can add or edit entries here."}
+      </div>
+
+      <div style={{ ...styles.card, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+        <div style={{ fontSize: 12, color: "#5B6B68" }}>
+          Move medications, Rx Templates, and dosing rules to or from another clinic branch —
+          exports everything exactly as it is right now, including any edits made in the app.
+        </div>
+        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+          <button style={{ ...styles.linkBtn, padding: "8px 13px", border: "1px solid #DCE3E1", borderRadius: 8 }} onClick={onExportData}>
+            Export data
+          </button>
+          {canEdit && (
+            <>
+              <button
+                style={{ ...styles.linkBtn, padding: "8px 13px", border: "1px solid #DCE3E1", borderRadius: 8 }}
+                onClick={() => importInputRef.current && importInputRef.current.click()}
+              >
+                Import data
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const file = e.target.files && e.target.files[0];
+                  if (file) onImportData(file);
+                  e.target.value = "";
+                }}
+              />
+            </>
+          )}
+        </div>
       </div>
 
       <div style={{ position: "relative", marginBottom: 14 }}>
