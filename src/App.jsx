@@ -16,8 +16,8 @@ const STORAGE_KEY = "clinic-data";
 const CLINIC_KEY = "clinic-info";
 
 const defaultClinicInfo = () => ({
-  name: "ALBA-ANICIETE MEDICAL CLINIC",
-  address: "2nd floor DG's Building, Don V. Robles, Poblacion 3, Tiaong, Quezon",
+  name: "ALBA-ANICIETE ADULT & PEDIA CLINIC",
+  address: "2nd Floor R&M Bldg, JC Wagan St, Poblacion, San Antonio, Quezon, 4324",
   phone: "+639175605585",
 });
 
@@ -464,6 +464,21 @@ async function loadDosingRules() {
 async function saveDosingRules(rules) {
   const { error } = await supabase.from("app_state").upsert({ key: "dosing-rules", value: rules, updated_at: new Date().toISOString() });
   if (error) console.error("saveDosingRules failed", error);
+}
+
+// A short notice shown on the public booking website (e.g. "Closed this Saturday for a
+// holiday"). Stored the same way as clinic info, but also readable by the public site itself —
+// see the extra RLS policy in schema-notice.sql.
+const defaultScheduleNotice = () => ({ message: "", active: false });
+async function loadScheduleNotice() {
+  const { data, error } = await supabase.from("app_state").select("value").eq("key", "schedule-notice").maybeSingle();
+  if (error) { console.error("loadScheduleNotice failed", error); return defaultScheduleNotice(); }
+  if (!data) return defaultScheduleNotice();
+  return { ...defaultScheduleNotice(), ...data.value };
+}
+async function saveScheduleNotice(notice) {
+  const { error } = await supabase.from("app_state").upsert({ key: "schedule-notice", value: notice, updated_at: new Date().toISOString() });
+  if (error) console.error("saveScheduleNotice failed", error);
 }
 
 // A short notice shown on the public booking website (e.g. "Closed this Saturday for a
@@ -1075,7 +1090,7 @@ function SignIn() {
     <div style={styles.centerScreen}>
       <style>{globalCss}</style>
       <div style={styles.signInCard}>
-        <img src="/logo-full.png" alt="Alba-Aniciete Medical Clinic" style={{ width: 180, display: "block", margin: "0 auto 14px" }} />
+        <img src="/logo-full.png" alt="Alba-Aniciete Adult & Pedia Clinic" style={{ width: 180, display: "block", margin: "0 auto 14px" }} />
         <p style={{ color: "#5B6B68", fontSize: 13.5, marginTop: 2, marginBottom: 18, textAlign: "center" }}>
           Sign in with the email and password your clinic admin set up for you.
         </p>
