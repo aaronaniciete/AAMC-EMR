@@ -1873,9 +1873,11 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
   }
 
   async function editRx(rxId, updates) {
+    const existing = data.prescriptions.find((r) => r.id === rxId);
     const prescriptions = data.prescriptions.map((r) => (r.id === rxId ? { ...r, ...updates } : r));
-    await persist(withAudit({ ...data, prescriptions }, "prescription_edited", `Edited a prescription (${updates.meds.length} medication${updates.meds.length === 1 ? "" : "s"})`));
-    showToast("Prescription updated");
+    const { treatmentPlans, matched } = appendToSameDayPlan(data.treatmentPlans, patient.id, existing && existing.date, formatMedsSection(updates.meds));
+    await persist(withAudit({ ...data, prescriptions, treatmentPlans }, "prescription_edited", `Edited a prescription (${updates.meds.length} medication${updates.meds.length === 1 ? "" : "s"})`));
+    showToast(matched ? "Prescription updated — added to that day's treatment plan" : "Prescription updated");
   }
 
   async function addCertificate(certData) {
@@ -1897,6 +1899,15 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
     const { treatmentPlans, matched } = appendToSameDayPlan(data.treatmentPlans, patient.id, labDate, formatLabsSection(labData));
     await persist(withAudit({ ...data, labRequests, treatmentPlans }, "lab_request_created", `Lab/diagnostic request (${count} item${count === 1 ? "" : "s"})`));
     showToast(matched ? "Lab request saved — added to today's treatment plan" : "Lab & diagnostic request saved");
+  }
+
+  async function editLabRequest(labId, updates) {
+    const existing = (data.labRequests || []).find((l) => l.id === labId);
+    const labRequests = (data.labRequests || []).map((l) => (l.id === labId ? { ...l, ...updates } : l));
+    const count = updates.tests.length + updates.details.length;
+    const { treatmentPlans, matched } = appendToSameDayPlan(data.treatmentPlans, patient.id, existing && existing.date, formatLabsSection(updates));
+    await persist(withAudit({ ...data, labRequests, treatmentPlans }, "lab_request_edited", `Edited a lab/diagnostic request (${count} item${count === 1 ? "" : "s"})`));
+    showToast(matched ? "Lab request updated — added to that day's treatment plan" : "Lab request updated");
   }
 
   async function updatePatientInfo(updated) {
@@ -1973,12 +1984,14 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
           clinicInfo={clinicInfo}
           provider={currentUser.name}
           onAddLabRequest={addLabRequest}
+          onEditLabRequest={editLabRequest}
           labTemplates={labTemplates}
           persistLabTemplates={persistLabTemplates}
           showToast={showToast}
           jumpTo={formsJumpTo}
           onJumped={() => setFormsJumpTo(null)}
           plans={plans}
+          userRole={currentUser.role}
         />
       )}
       {tab === "activity" && <ActivityLogTab auditLog={auditLog} />}
@@ -2152,7 +2165,7 @@ function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs, history, rx, labR
   }
 
   function save() {
-    if (!plan.trim()) return;
+    // No field is required — a plan can be saved blank and filled in (or synced into) later.
     const payload = {
       subjective: subjective.trim(),
       objective: objective.trim(),
@@ -2598,7 +2611,7 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
 }
 
 /* ---------------- Forms (Medical Certificate, etc.) ---------------- */
-function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAddLabRequest, patient, clinicInfo, provider, jumpTo, onJumped, labTemplates, persistLabTemplates, showToast, plans }) {
+function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAddLabRequest, onEditLabRequest, patient, clinicInfo, provider, jumpTo, onJumped, labTemplates, persistLabTemplates, showToast, plans, userRole }) {
   const [formType, setFormType] = useState("cert");
   const [autoOpenLabs, setAutoOpenLabs] = useState(false);
 
@@ -2642,6 +2655,7 @@ function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAd
         <LabRequestSection
           labRequests={labRequests}
           onAddLabRequest={onAddLabRequest}
+          onEditLabRequest={onEditLabRequest}
           patient={patient}
           clinicInfo={clinicInfo}
           provider={provider}
@@ -2650,6 +2664,7 @@ function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAd
           labTemplates={labTemplates}
           persistLabTemplates={persistLabTemplates}
           showToast={showToast}
+          userRole={userRole}
         />
       )}
     </div>
@@ -3395,8 +3410,9 @@ function LabTemplateManager({ labTemplates, persistLabTemplates, onClose, showTo
   );
 }
 
-function LabRequestSection({ labRequests, onAddLabRequest, patient, clinicInfo, provider, autoOpen, onAutoOpened, labTemplates, persistLabTemplates, showToast }) {
+function LabRequestSection({ labRequests, onAddLabRequest, onEditLabRequest, patient, clinicInfo, provider, autoOpen, onAutoOpened, labTemplates, persistLabTemplates, showToast, userRole }) {
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [checks, setChecks] = useState({});
   const [detailChecks, setDetailChecks] = useState({}); // Xray/Ultrasound/CT-Scan/Others -> bool
   const [detailText, setDetailText] = useState({}); // Xray/Ultrasound/CT-Scan/Others -> free text
@@ -3421,7 +3437,16 @@ function LabRequestSection({ labRequests, onAddLabRequest, patient, clinicInfo, 
     setChecks({});
     setDetailChecks({});
     setDetailText({});
+    setEditingId(null);
     setShowForm(false);
+  }
+
+  function startEdit(l) {
+    setChecks(Object.fromEntries(l.tests.map((t) => [t, true])));
+    setDetailChecks(Object.fromEntries(l.details.map((d) => [d.label, true])));
+    setDetailText(Object.fromEntries(l.details.map((d) => [d.label, d.detail || ""])));
+    setEditingId(l.id);
+    setShowForm(true);
   }
 
   // Applying a template adds to whatever's already checked (so two templates can be combined),
@@ -3447,7 +3472,11 @@ function LabRequestSection({ labRequests, onAddLabRequest, patient, clinicInfo, 
     const testsChecked = LAB_TEST_CHECKLIST.filter((t) => checks[t]);
     const detailsChecked = LAB_TEST_WITH_DETAIL.filter((t) => detailChecks[t]).map((t) => ({ label: t, detail: (detailText[t] || "").trim() }));
     if (testsChecked.length === 0 && detailsChecked.length === 0) return;
-    onAddLabRequest({ tests: testsChecked, details: detailsChecked });
+    if (editingId) {
+      onEditLabRequest(editingId, { tests: testsChecked, details: detailsChecked });
+    } else {
+      onAddLabRequest({ tests: testsChecked, details: detailsChecked });
+    }
     resetForm();
   }
 
@@ -3457,7 +3486,7 @@ function LabRequestSection({ labRequests, onAddLabRequest, patient, clinicInfo, 
         <button style={styles.linkBtn} onClick={() => setShowTemplateManager(true)}>
           <ClipboardList size={13} /> Manage templates
         </button>
-        <button style={styles.primaryBtn} onClick={() => setShowForm((s) => !s)}>
+        <button style={styles.primaryBtn} onClick={() => (showForm ? resetForm() : setShowForm(true))}>
           <Plus size={15} /> New lab &amp; diagnostic request
         </button>
       </div>
@@ -3501,8 +3530,11 @@ function LabRequestSection({ labRequests, onAddLabRequest, patient, clinicInfo, 
             columns={3}
           />
           <button style={{ ...styles.primaryBtn, justifyContent: "center", marginTop: 14 }} onClick={saveRequest}>
-            <Check size={15} /> Save request
+            <Check size={15} /> {editingId ? "Save changes" : "Save request"}
           </button>
+          {editingId && (
+            <button style={{ ...styles.linkBtn, padding: "9px 14px", marginTop: 8 }} onClick={resetForm}>Cancel</button>
+          )}
         </div>
       )}
 
@@ -3515,9 +3547,16 @@ function LabRequestSection({ labRequests, onAddLabRequest, patient, clinicInfo, 
               <div key={l.id} style={styles.entryCard}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div style={styles.entryDate}>{fmtDateTime(l.date)} · {l.provider}</div>
-                  <button style={styles.linkBtn} onClick={() => handlePrint(l)}>
-                    <FileText size={13} /> Print
-                  </button>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    {canEditClinical(userRole) && (
+                      <button style={styles.linkBtn} onClick={() => startEdit(l)}>
+                        <Pencil size={12} /> Edit
+                      </button>
+                    )}
+                    <button style={styles.linkBtn} onClick={() => handlePrint(l)}>
+                      <FileText size={13} /> Print
+                    </button>
+                  </div>
                 </div>
                 <div style={{ fontSize: 13, color: "#12312D", marginTop: 4 }}>
                   {[...l.tests, ...l.details.map((d) => (d.detail ? `${d.label}: ${d.detail}` : d.label))].join(", ")}
