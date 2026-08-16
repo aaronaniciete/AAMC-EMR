@@ -610,6 +610,10 @@ function computeWeightDose(medName, weightKg, rule) {
 
 // Formats the most recently recorded vitals into one line, used to pre-fill the Objective
 // field when starting a new treatment plan.
+function isSameDay(dateA, dateB) {
+  return (dateA || "").slice(0, 10) === (dateB || "").slice(0, 10);
+}
+
 function formatVitalsForObjective(vitals) {
   if (!vitals) return "";
   const parts = [
@@ -646,14 +650,20 @@ function formatLabsSection(labData) {
   return items.length > 0 ? `Labs and Diagnostics\n${items.join("\n")}` : "";
 }
 
-// Builds the Plan field's starting text: a "Medications" section from the most recent
-// prescription, and a "Labs and Diagnostics" section from the most recent lab/diagnostic
-// request — each section only appears if there's actually something to show.
-function formatPlanFromRxAndLabs(rxList, labList) {
+// Builds the Plan field's starting text — ONLY from prescriptions and lab requests already
+// created THE SAME DAY as forDate, never from a previous visit. If there are several from
+// today (e.g. two prescriptions), all of them are combined into one Medications section, same
+// for labs — matching how appendToSameDayPlan would have built it up incrementally.
+function formatPlanFromRxAndLabs(rxList, labList, forDate) {
+  const sameDayRx = (rxList || []).filter((r) => isSameDay(r.date, forDate));
+  const sameDayLabs = (labList || []).filter((l) => isSameDay(l.date, forDate));
   const sections = [];
-  const medsSection = formatMedsSection(rxList && rxList[0] && rxList[0].meds);
+  const allMeds = sameDayRx.flatMap((r) => r.meds || []);
+  const medsSection = formatMedsSection(allMeds);
   if (medsSection) sections.push(medsSection);
-  const labsSection = formatLabsSection(labList && labList[0]);
+  const allTests = sameDayLabs.flatMap((l) => l.tests || []);
+  const allDetails = sameDayLabs.flatMap((l) => l.details || []);
+  const labsSection = formatLabsSection({ tests: allTests, details: allDetails });
   if (labsSection) sections.push(labsSection);
   return sections.join("\n\n");
 }
@@ -664,10 +674,9 @@ function formatPlanFromRxAndLabs(rxList, labList) {
 // typed into Plan is never touched, only added to.
 function appendToSameDayPlan(treatmentPlans, patientId, dateISO, sectionText) {
   if (!sectionText) return { treatmentPlans, matched: false };
-  const day = (dateISO || "").slice(0, 10);
   let matched = false;
   const updated = treatmentPlans.map((t) => {
-    if (t.patientId === patientId && (t.date || "").slice(0, 10) === day) {
+    if (t.patientId === patientId && isSameDay(t.date, dateISO)) {
       matched = true;
       const existing = (t.plan || "").trim();
       return { ...t, plan: existing ? `${existing}\n\n${sectionText}` : sectionText };
@@ -677,14 +686,13 @@ function appendToSameDayPlan(treatmentPlans, patientId, dateISO, sectionText) {
   return { treatmentPlans: updated, matched };
 }
 
-// Joins every chart note (newest first, same order as the Chart tab) into one block of text,
-// used to pre-fill the Subjective field when starting a new treatment plan.
-function formatChartNotesForSubjective(history) {
+// Joins chart notes from THE SAME DAY as forDate only — never a previous visit — into one
+// block of text, used to pre-fill the Subjective field when starting a new treatment plan.
+function formatChartNotesForSubjective(history, forDate) {
   if (!history || history.length === 0) return "";
-  return history
-    .filter((h) => h.note)
-    .map((h) => `[${fmtDateTime(h.date)}] ${h.note}`)
-    .join("\n\n");
+  const sameDay = history.filter((h) => h.note && isSameDay(h.date, forDate));
+  if (sameDay.length === 0) return "";
+  return sameDay.map((h) => `[${fmtDateTime(h.date)}] ${h.note}`).join("\n\n");
 }
 
 function getLatestVitals(history) {
@@ -1975,6 +1983,7 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
           { key: "plans", label: "Treatment plans", icon: Stethoscope },
           { key: "rx", label: "Prescriptions", icon: Pill },
           { key: "forms", label: "Forms", icon: ClipboardList },
+          { key: "visitHistory", label: "Visit History", icon: CalendarDays },
           { key: "activity", label: "Activity log", icon: Clock },
         ].map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => setTab(key)} style={{ ...styles.tabBtn, ...(tab === key ? styles.tabBtnActive : {}) }}>
@@ -2008,7 +2017,140 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
           icdCodes={icdCodes}
         />
       )}
+      {tab === "visitHistory" && <VisitHistoryTab history={history} plans={plans} rx={rx} certs={certs} exams={exams} labRequests={labRequests} />}
       {tab === "activity" && <ActivityLogTab auditLog={auditLog} />}
+    </div>
+  );
+}
+
+// Groups everything on record for a patient — chart notes, treatment plans, prescriptions,
+// certificates, exams, and lab requests — by the calendar day they happened on, so a whole
+// visit's worth of activity can be reviewed in one place instead of hunting across tabs.
+function VisitHistoryTab({ history, plans, rx, certs, exams, labRequests }) {
+  const dateSet = new Set();
+  const addDates = (arr) => (arr || []).forEach((item) => item.date && dateSet.add(item.date.slice(0, 10)));
+  addDates(history); addDates(plans); addDates(rx); addDates(certs); addDates(exams); addDates(labRequests);
+  const days = Array.from(dateSet).sort((a, b) => b.localeCompare(a));
+  const byDay = (arr, day) => (arr || []).filter((item) => item.date && item.date.slice(0, 10) === day);
+
+  return (
+    <div>
+      <SectionCard title="Visit history">
+        {days.length === 0 ? (
+          <EmptyState text="No visits recorded yet." />
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {days.map((day) => {
+              const dayNotes = byDay(history, day);
+              const dayPlans = byDay(plans, day);
+              const dayRx = byDay(rx, day);
+              const dayCerts = byDay(certs, day);
+              const dayExams = byDay(exams, day);
+              const dayLabs = byDay(labRequests, day);
+              return (
+                <div key={day} style={styles.card}>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: "#12312D", marginBottom: 12, fontFamily: "Fraunces, serif" }}>
+                    {fmtDate(day)}
+                  </div>
+
+                  {dayNotes.length > 0 && (
+                    <VisitSection title="Chart notes">
+                      {dayNotes.map((h) => {
+                        const vitalsLine = [
+                          h.weight ? `Wt ${h.weight}` : "",
+                          h.bp ? `BP ${h.bp}` : "",
+                          h.heartRate ? `HR ${h.heartRate}` : "",
+                          h.temp ? `Temp ${h.temp}` : "",
+                        ].filter(Boolean).join(" · ");
+                        return (
+                          <div key={h.id} style={{ marginBottom: 8 }}>
+                            <div style={{ fontSize: 11.5, color: "#5B6B68" }}>{fmtDateTime(h.date)} · {h.provider}</div>
+                            {vitalsLine && <div style={{ ...styles.mono, fontSize: 12, color: "#0F5E56" }}>{vitalsLine}</div>}
+                            <div style={{ fontSize: 13.5, color: "#2A3B38" }}>{h.note}</div>
+                          </div>
+                        );
+                      })}
+                    </VisitSection>
+                  )}
+
+                  {dayPlans.length > 0 && (
+                    <VisitSection title="Treatment plan">
+                      {dayPlans.map((p) => (
+                        <div key={p.id} style={{ marginBottom: 8 }}>
+                          <div style={{ fontSize: 11.5, color: "#5B6B68", marginBottom: 3 }}>{p.provider}</div>
+                          {p.subjective && <SoapLine label="S" text={p.subjective} />}
+                          {p.objective && <SoapLine label="O" text={p.objective} />}
+                          {(p.assessment || p.diagnosis) && <SoapLine label="A" text={p.assessment || p.diagnosis} bold />}
+                          {p.plan && <SoapLine label="P" text={p.plan} />}
+                          {p.followUp && <div style={{ fontSize: 12, color: "#5B6B68", marginTop: 4 }}>Follow-up: {p.followUp}</div>}
+                        </div>
+                      ))}
+                    </VisitSection>
+                  )}
+
+                  {dayRx.length > 0 && (
+                    <VisitSection title="Prescriptions">
+                      {dayRx.map((r) => (
+                        <div key={r.id} style={{ marginBottom: 8 }}>
+                          <div style={{ fontSize: 11.5, color: "#5B6B68", marginBottom: 2 }}>{r.provider}</div>
+                          {r.meds.map((m, i) => (
+                            <div key={i} style={{ fontSize: 13.5, color: "#2A3B38" }}>
+                              {m.qty ? `[${m.qty}] ` : ""}{m.name}{m.indication ? ` (${m.indication})` : ""} — AM {m.am || "0"} · NN {m.nn || "0"} · PM {m.pm || "0"}{m.remarks ? ` — ${m.remarks}` : ""}
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </VisitSection>
+                  )}
+
+                  {dayLabs.length > 0 && (
+                    <VisitSection title="Lab & diagnostic requests">
+                      {dayLabs.map((l) => (
+                        <div key={l.id} style={{ fontSize: 13.5, color: "#2A3B38", marginBottom: 6 }}>
+                          {[...l.tests, ...l.details.map((d) => (d.detail ? `${d.label}: ${d.detail}` : d.label))].join(", ")}
+                        </div>
+                      ))}
+                    </VisitSection>
+                  )}
+
+                  {dayCerts.length > 0 && (
+                    <VisitSection title="Medical certificates">
+                      {dayCerts.map((c) => (
+                        <div key={c.id} style={{ fontSize: 13.5, color: "#2A3B38", marginBottom: 6 }}>
+                          {c.reason && <div><b>For:</b> {c.reason}</div>}
+                          {c.assessment && <div><b>Assessment:</b> {c.assessment}</div>}
+                          {c.recommendation && <div><b>Recommendation:</b> {c.recommendation}</div>}
+                        </div>
+                      ))}
+                    </VisitSection>
+                  )}
+
+                  {dayExams.length > 0 && (
+                    <VisitSection title="Physical exam">
+                      {dayExams.map((e) => (
+                        <div key={e.id} style={{ fontSize: 13.5, color: "#2A3B38", marginBottom: 6 }}>
+                          {e.classification || "Physical exam completed"} — see Forms tab for the full report
+                        </div>
+                      ))}
+                    </VisitSection>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </SectionCard>
+    </div>
+  );
+}
+
+function VisitSection({ title, children }) {
+  return (
+    <div style={{ marginBottom: 12, paddingBottom: 12, borderBottom: "1px solid #EDF1F0" }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "#0F5E56", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>
+        {title}
+      </div>
+      {children}
     </div>
   );
 }
@@ -2159,10 +2301,11 @@ function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs, history, rx, labR
   }
 
   function startAdd() {
-    setSubjective(formatChartNotesForSubjective(history));
-    setObjective(formatVitalsForObjective(getLatestVitals(history)));
+    const today = new Date().toISOString();
+    setSubjective(formatChartNotesForSubjective(history, today));
+    setObjective(formatVitalsForObjective(getLatestVitals(history.filter((h) => isSameDay(h.date, today)))));
     setAssessment("");
-    setPlan(formatPlanFromRxAndLabs(rx, labRequests));
+    setPlan(formatPlanFromRxAndLabs(rx, labRequests, today));
     setFollowUp("");
     setEditingId(null);
     setShowForm(true);
@@ -2210,17 +2353,17 @@ function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs, history, rx, labR
           <Field label="S · Subjective">
             <textarea style={{ ...styles.input, minHeight: 80, fontFamily: "inherit" }} value={subjective} onChange={(e) => setSubjective(e.target.value)} placeholder="What the patient reports — symptoms, complaints, history" />
           </Field>
-          {history && history.length > 0 && (
+          {subjective && (
             <div style={{ fontSize: 11, color: "#8A9793", marginTop: -6, marginBottom: 10 }}>
-              Filled in from this patient's chart notes — edit or trim freely.
+              Filled in from this patient's chart notes from today — edit or trim freely.
             </div>
           )}
           <Field label="O · Objective">
             <textarea style={{ ...styles.input, minHeight: 70, fontFamily: "inherit" }} value={objective} onChange={(e) => setObjective(e.target.value)} placeholder="Measurable findings — vitals, exam findings, results" />
           </Field>
-          {objective && objective === formatVitalsForObjective(getLatestVitals(history)) && (
+          {objective && objective === formatVitalsForObjective(getLatestVitals(history.filter((h) => isSameDay(h.date, new Date().toISOString())))) && (
             <div style={{ fontSize: 11, color: "#8A9793", marginTop: -6, marginBottom: 10 }}>
-              Filled in from this patient's most recent recorded vitals — edit or trim freely.
+              Filled in from this patient's vitals recorded today — edit or trim freely.
             </div>
           )}
           <Field label="A · Assessment">
@@ -2235,9 +2378,9 @@ function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs, history, rx, labR
           <Field label="P · Plan">
             <textarea style={{ ...styles.input, minHeight: 90, fontFamily: "inherit" }} value={plan} onChange={(e) => setPlan(e.target.value)} placeholder="Interventions, goals, patient education, referrals…" />
           </Field>
-          {plan && plan === formatPlanFromRxAndLabs(rx, labRequests) && (
+          {plan && plan === formatPlanFromRxAndLabs(rx, labRequests, new Date().toISOString()) && (
             <div style={{ fontSize: 11, color: "#8A9793", marginTop: -6, marginBottom: 10 }}>
-              Filled in from the most recent prescription and lab/diagnostic request — add anything else and edit freely.
+              Filled in from today's prescription(s) and lab/diagnostic request(s) — add anything else and edit freely.
             </div>
           )}
           <Field label="Follow-up">
