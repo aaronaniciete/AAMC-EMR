@@ -733,6 +733,7 @@ export default function ClinicEMR() {
   const [dosingRules, setDosingRules] = useState(defaultDosingRules());
   const [pendingRegistrations, setPendingRegistrations] = useState([]);
   const [scheduleNotice, setScheduleNotice] = useState(defaultScheduleNotice());
+  const [icdCodes, setIcdCodes] = useState([]);
   const [view, setView] = useState("dashboard");
   const [selectedPatientId, setSelectedPatientId] = useState(null);
   const [toast, setToast] = useState(null);
@@ -802,6 +803,17 @@ export default function ClinicEMR() {
       setScheduleNotice(notice);
       setDataLoading(false);
     })();
+  }, [userId]);
+
+  // ICD-10 reference list for the Assessment suggestion feature — a large static file (not
+  // stored in Supabase), fetched once in the background so it doesn't slow down the main app
+  // load. By the time anyone opens a treatment plan or certificate form, it's normally ready.
+  useEffect(() => {
+    if (!userId) return;
+    fetch("/icd-codes.json")
+      .then((res) => res.json())
+      .then((list) => setIcdCodes(Array.isArray(list) ? list : []))
+      .catch((e) => console.error("loading icd-codes.json failed", e));
   }, [userId]);
 
   const showToast = useCallback((msg) => {
@@ -1024,6 +1036,7 @@ export default function ClinicEMR() {
               labTemplates={labTemplates}
               persistLabTemplates={persistLabTemplates}
               dosingRules={dosingRules}
+              icdCodes={icdCodes}
               onBack={() => {
                 setSelectedPatientId(null);
                 setView("patients");
@@ -1806,7 +1819,7 @@ const PATIENT_EDITABLE_FIELDS = [
   { key: "allergies", label: "Allergies" },
 ];
 
-function PatientDetail({ patient, data, persist, currentUser, showToast, clinicInfo, commonMeds, rxTemplates, labTemplates, persistLabTemplates, dosingRules, onBack }) {
+function PatientDetail({ patient, data, persist, currentUser, showToast, clinicInfo, commonMeds, rxTemplates, labTemplates, persistLabTemplates, dosingRules, icdCodes, onBack }) {
   const [tab, setTab] = useState("chart");
   const [formsJumpTo, setFormsJumpTo] = useState(null); // lets "Order Labs" (in Treatment Plans) open Forms straight to the lab request
   const [showEditPatient, setShowEditPatient] = useState(false);
@@ -1971,7 +1984,7 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
       </div>
 
       {tab === "chart" && <ChartTab history={history} onAddNote={addNote} onEditNote={editNote} />}
-      {tab === "plans" && <PlansTab plans={plans} onAddPlan={addPlan} onEditPlan={editPlan} onOrderLabs={goOrderLabs} history={history} rx={rx} labRequests={labRequests} />}
+      {tab === "plans" && <PlansTab plans={plans} onAddPlan={addPlan} onEditPlan={editPlan} onOrderLabs={goOrderLabs} history={history} rx={rx} labRequests={labRequests} icdCodes={icdCodes} />}
       {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} onEditRx={editRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} commonMeds={commonMeds} rxTemplates={rxTemplates} history={history} dosingRules={dosingRules} userRole={currentUser.role} />}
       {tab === "forms" && (
         <FormsTab
@@ -1992,6 +2005,7 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
           onJumped={() => setFormsJumpTo(null)}
           plans={plans}
           userRole={currentUser.role}
+          icdCodes={icdCodes}
         />
       )}
       {tab === "activity" && <ActivityLogTab auditLog={auditLog} />}
@@ -2130,7 +2144,7 @@ function ChartTab({ history, onAddNote, onEditNote }) {
   );
 }
 
-function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs, history, rx, labRequests }) {
+function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs, history, rx, labRequests, icdCodes }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [subjective, setSubjective] = useState("");
@@ -2210,7 +2224,13 @@ function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs, history, rx, labR
             </div>
           )}
           <Field label="A · Assessment">
-            <textarea style={{ ...styles.input, minHeight: 60, fontFamily: "inherit" }} value={assessment} onChange={(e) => setAssessment(e.target.value)} placeholder="Diagnosis or clinical impression" />
+            <AssessmentAutocomplete
+              value={assessment}
+              onChange={setAssessment}
+              icdCodes={icdCodes}
+              placeholder="Diagnosis or clinical impression — start typing for ICD-10 suggestions"
+              minHeight={60}
+            />
           </Field>
           <Field label="P · Plan">
             <textarea style={{ ...styles.input, minHeight: 90, fontFamily: "inherit" }} value={plan} onChange={(e) => setPlan(e.target.value)} placeholder="Interventions, goals, patient education, referrals…" />
@@ -2611,7 +2631,7 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
 }
 
 /* ---------------- Forms (Medical Certificate, etc.) ---------------- */
-function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAddLabRequest, onEditLabRequest, patient, clinicInfo, provider, jumpTo, onJumped, labTemplates, persistLabTemplates, showToast, plans, userRole }) {
+function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAddLabRequest, onEditLabRequest, patient, clinicInfo, provider, jumpTo, onJumped, labTemplates, persistLabTemplates, showToast, plans, userRole, icdCodes }) {
   const [formType, setFormType] = useState("cert");
   const [autoOpenLabs, setAutoOpenLabs] = useState(false);
 
@@ -2646,7 +2666,7 @@ function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAd
         </button>
       </div>
       {formType === "cert" && (
-        <MedCertSection certs={certs} onAddCertificate={onAddCertificate} patient={patient} clinicInfo={clinicInfo} provider={provider} plans={plans} />
+        <MedCertSection certs={certs} onAddCertificate={onAddCertificate} patient={patient} clinicInfo={clinicInfo} provider={provider} plans={plans} icdCodes={icdCodes} />
       )}
       {formType === "exam" && (
         <PhysicalExamSection exams={exams} onAddExam={onAddExam} patient={patient} clinicInfo={clinicInfo} provider={provider} />
@@ -2671,7 +2691,7 @@ function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAd
   );
 }
 
-function MedCertSection({ certs, onAddCertificate, patient, clinicInfo, provider, plans }) {
+function MedCertSection({ certs, onAddCertificate, patient, clinicInfo, provider, plans, icdCodes }) {
   const [showForm, setShowForm] = useState(false);
   const [examDate, setExamDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [reason, setReason] = useState("");
@@ -2723,7 +2743,13 @@ function MedCertSection({ certs, onAddCertificate, patient, clinicInfo, provider
             </Field>
           </div>
           <Field label="Assessment / Impression">
-            <textarea style={{ ...styles.input, minHeight: 80, fontFamily: "inherit" }} value={assessment} onChange={(e) => setAssessment(e.target.value)} />
+            <AssessmentAutocomplete
+              value={assessment}
+              onChange={setAssessment}
+              icdCodes={icdCodes}
+              placeholder="Start typing for ICD-10 suggestions"
+              minHeight={80}
+            />
           </Field>
           {latestDiagnosis && assessment === latestDiagnosis && (
             <div style={{ fontSize: 11, color: "#8A9793", marginTop: -6, marginBottom: 10 }}>
@@ -4337,6 +4363,82 @@ function Field({ label, children, style }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 4, ...style }}>
       <label style={styles.label}>{label}</label>
       {children}
+    </div>
+  );
+}
+
+// A textarea with ICD-10 diagnosis suggestions. Matches against whatever's typed on the
+// current line only (not the whole field), so multiple diagnoses can be listed one per line
+// and each gets its own suggestions. Picking one replaces just that line's typed-so-far text —
+// any list numbering the person already typed (e.g. "1. ") is preserved.
+function AssessmentAutocomplete({ value, onChange, icdCodes, placeholder, minHeight }) {
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const textareaRef = useRef(null);
+
+  function currentLineInfo(text, cursorPos) {
+    const before = text.slice(0, cursorPos);
+    const lineStart = before.lastIndexOf("\n") + 1;
+    const linePrefixTyped = before.slice(lineStart);
+    const markerMatch = linePrefixTyped.match(/^[\s\d.\-)]*/);
+    const marker = markerMatch ? markerMatch[0] : "";
+    const searchTerm = linePrefixTyped.slice(marker.length).trim();
+    return { lineStart, marker, searchTerm };
+  }
+
+  function handleChange(e) {
+    const newValue = e.target.value;
+    onChange(newValue);
+    const cursorPos = e.target.selectionStart;
+    const { searchTerm } = currentLineInfo(newValue, cursorPos);
+    if (searchTerm.length >= 2 && icdCodes && icdCodes.length > 0) {
+      const q = searchTerm.toLowerCase();
+      const matches = icdCodes.filter((c) => c.description.toLowerCase().includes(q)).slice(0, 8);
+      setSuggestions(matches);
+      setShowSuggestions(matches.length > 0);
+    } else {
+      setShowSuggestions(false);
+    }
+  }
+
+  function pickSuggestion(item) {
+    const cursorPos = textareaRef.current ? textareaRef.current.selectionStart : value.length;
+    const { lineStart, marker } = currentLineInfo(value, cursorPos);
+    const before = value.slice(0, lineStart);
+    const after = value.slice(cursorPos);
+    const inserted = `${marker}${item.description} (${item.code})`;
+    const newValue = before + inserted + after;
+    onChange(newValue);
+    setShowSuggestions(false);
+    const newCursorPos = (before + inserted).length;
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
+      }
+    }, 0);
+  }
+
+  return (
+    <div style={{ position: "relative" }}>
+      <textarea
+        ref={textareaRef}
+        style={{ ...styles.input, minHeight: minHeight || 60, fontFamily: "inherit" }}
+        value={value}
+        onChange={handleChange}
+        onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+        placeholder={placeholder}
+      />
+      {showSuggestions && (
+        <div style={styles.suggestBox}>
+          {suggestions.map((s) => (
+            <div key={s.code} style={styles.suggestItem} onMouseDown={() => pickSuggestion(s)}>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>{s.description}</div>
+              <div style={{ fontSize: 11, color: "#5B6B68", fontFamily: "IBM Plex Mono, monospace", marginTop: 1 }}>{s.code}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
