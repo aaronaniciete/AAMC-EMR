@@ -16,8 +16,8 @@ const STORAGE_KEY = "clinic-data";
 const CLINIC_KEY = "clinic-info";
 
 const defaultClinicInfo = () => ({
-  name: "ALBA-ANICIETE ADULT & PEDIA CLINIC",
-  address: "2nd Floor R&M Bldg, JC Wagan St, Poblacion, San Antonio, Quezon, 4324",
+  name: "ALBA-ANICIETE MEDICAL CLINIC",
+  address: "2nd floor DG's Building, Don V. Robles, Poblacion 3, Tiaong, Quezon",
   phone: "+639175605585",
 });
 
@@ -464,21 +464,6 @@ async function loadDosingRules() {
 async function saveDosingRules(rules) {
   const { error } = await supabase.from("app_state").upsert({ key: "dosing-rules", value: rules, updated_at: new Date().toISOString() });
   if (error) console.error("saveDosingRules failed", error);
-}
-
-// A short notice shown on the public booking website (e.g. "Closed this Saturday for a
-// holiday"). Stored the same way as clinic info, but also readable by the public site itself —
-// see the extra RLS policy in schema-notice.sql.
-const defaultScheduleNotice = () => ({ message: "", active: false });
-async function loadScheduleNotice() {
-  const { data, error } = await supabase.from("app_state").select("value").eq("key", "schedule-notice").maybeSingle();
-  if (error) { console.error("loadScheduleNotice failed", error); return defaultScheduleNotice(); }
-  if (!data) return defaultScheduleNotice();
-  return { ...defaultScheduleNotice(), ...data.value };
-}
-async function saveScheduleNotice(notice) {
-  const { error } = await supabase.from("app_state").upsert({ key: "schedule-notice", value: notice, updated_at: new Date().toISOString() });
-  if (error) console.error("saveScheduleNotice failed", error);
 }
 
 // A short notice shown on the public booking website (e.g. "Closed this Saturday for a
@@ -1090,7 +1075,7 @@ function SignIn() {
     <div style={styles.centerScreen}>
       <style>{globalCss}</style>
       <div style={styles.signInCard}>
-        <img src="/logo-full.png" alt="Alba-Aniciete Adult & Pedia Clinic" style={{ width: 180, display: "block", margin: "0 auto 14px" }} />
+        <img src="/logo-full.png" alt="Alba-Aniciete Medical Clinic" style={{ width: 180, display: "block", margin: "0 auto 14px" }} />
         <p style={{ color: "#5B6B68", fontSize: 13.5, marginTop: 2, marginBottom: 18, textAlign: "center" }}>
           Sign in with the email and password your clinic admin set up for you.
         </p>
@@ -1864,6 +1849,12 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
     showToast("Prescription created");
   }
 
+  async function editRx(rxId, updates) {
+    const prescriptions = data.prescriptions.map((r) => (r.id === rxId ? { ...r, ...updates } : r));
+    await persist(withAudit({ ...data, prescriptions }, "prescription_edited", `Edited a prescription (${updates.meds.length} medication${updates.meds.length === 1 ? "" : "s"})`));
+    showToast("Prescription updated");
+  }
+
   async function addCertificate(certData) {
     const certificates = [...(data.certificates || []), { ...certData, id: uid("cert"), patientId: patient.id, date: new Date().toISOString(), provider: currentUser.name }];
     await persist(withAudit({ ...data, certificates }, "certificate_created", "Issued a medical certificate"));
@@ -1945,7 +1936,7 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
 
       {tab === "chart" && <ChartTab history={history} onAddNote={addNote} onEditNote={editNote} />}
       {tab === "plans" && <PlansTab plans={plans} onAddPlan={addPlan} onEditPlan={editPlan} onOrderLabs={goOrderLabs} history={history} rx={rx} labRequests={labRequests} />}
-      {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} commonMeds={commonMeds} rxTemplates={rxTemplates} history={history} dosingRules={dosingRules} userRole={currentUser.role} />}
+      {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} onEditRx={editRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} commonMeds={commonMeds} rxTemplates={rxTemplates} history={history} dosingRules={dosingRules} userRole={currentUser.role} />}
       {tab === "forms" && (
         <FormsTab
           certs={certs}
@@ -2238,8 +2229,9 @@ function SoapLine({ label, text, bold }) {
   );
 }
 
-function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds, rxTemplates, history, dosingRules, userRole }) {
+function RxTab({ rx, onAddRx, onEditRx, isPeds, patient, clinicInfo, provider, commonMeds, rxTemplates, history, dosingRules, userRole }) {
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [meds, setMeds] = useState([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "", indication: "" }]);
   const [notes, setNotes] = useState("");
   const [openSuggestRow, setOpenSuggestRow] = useState(null);
@@ -2248,6 +2240,20 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
   const medList = commonMeds;
   const templateList = rxTemplates;
   const patientWeightKg = parseFloat(getLatestVitals(history).weight) || null;
+
+  function resetForm() {
+    setMeds([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "", indication: "" }]);
+    setNotes("");
+    setEditingId(null);
+    setShowForm(false);
+  }
+
+  function startEdit(r) {
+    setMeds(r.meds.map((m) => ({ ...m })));
+    setNotes(r.notes || "");
+    setEditingId(r.id);
+    setShowForm(true);
+  }
 
   function applyTemplate(tpl) {
     setMeds(tpl.meds.map((m) => ({ ...m })));
@@ -2291,11 +2297,11 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
     <div>
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
         {canEditClinical(userRole) ? (
-          <button style={styles.primaryBtn} onClick={() => setShowForm((s) => !s)}>
+          <button style={styles.primaryBtn} onClick={() => (showForm ? resetForm() : setShowForm(true))}>
             <Plus size={15} /> New prescription
           </button>
         ) : (
-          <div style={{ fontSize: 12, color: "#8A9793" }}>Only nurses and physicians can create prescriptions.</div>
+          <div style={{ fontSize: 12, color: "#8A9793" }}>Only nurses and physicians can create or edit prescriptions.</div>
         )}
       </div>
       {showForm && canEditClinical(userRole) && (
@@ -2423,17 +2429,26 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
           <Field label="Notes for patient/pharmacy">
             <textarea style={{ ...styles.input, minHeight: 60, fontFamily: "inherit" }} value={notes} onChange={(e) => setNotes(e.target.value)} />
           </Field>
-          <button
-            style={{ ...styles.primaryBtn, justifyContent: "center", marginTop: 6 }}
-            onClick={() => {
-              const validMeds = meds.filter((m) => m.name.trim());
-              if (validMeds.length === 0) return;
-              onAddRx({ meds: validMeds, notes: notes.trim() });
-              setMeds([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "", indication: "" }]); setNotes(""); setShowForm(false);
-            }}
-          >
-            <Check size={15} /> Save prescription
-          </button>
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <button
+              style={{ ...styles.primaryBtn, justifyContent: "center" }}
+              onClick={() => {
+                const validMeds = meds.filter((m) => m.name.trim());
+                if (validMeds.length === 0) return;
+                if (editingId) {
+                  onEditRx(editingId, { meds: validMeds, notes: notes.trim() });
+                } else {
+                  onAddRx({ meds: validMeds, notes: notes.trim() });
+                }
+                resetForm();
+              }}
+            >
+              <Check size={15} /> {editingId ? "Save changes" : "Save prescription"}
+            </button>
+            {editingId && (
+              <button style={{ ...styles.linkBtn, padding: "9px 14px" }} onClick={resetForm}>Cancel</button>
+            )}
+          </div>
         </div>
       )}
       <SectionCard title="Prescription history">
@@ -2445,9 +2460,16 @@ function RxTab({ rx, onAddRx, isPeds, patient, clinicInfo, provider, commonMeds,
               <div key={r.id} style={styles.entryCard}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div style={styles.entryDate}>{fmtDateTime(r.date)} · {r.provider}</div>
-                  <button style={styles.linkBtn} onClick={() => handlePrint(r)}>
-                    <FileText size={13} /> Print
-                  </button>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    {canEditClinical(userRole) && (
+                      <button style={styles.linkBtn} onClick={() => startEdit(r)}>
+                        <Pencil size={12} /> Edit
+                      </button>
+                    )}
+                    <button style={styles.linkBtn} onClick={() => handlePrint(r)}>
+                      <FileText size={13} /> Print
+                    </button>
+                  </div>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
                   {r.meds.map((m, idx) => (
