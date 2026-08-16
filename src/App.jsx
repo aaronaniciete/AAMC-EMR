@@ -621,39 +621,60 @@ function formatVitalsForObjective(vitals) {
   return parts.join(", ");
 }
 
-// Lists the medications from the most recent prescription, used to pre-fill the Plan field
-// when starting a new treatment plan.
+// Small formatters for a Plan field's "Medications" / "Labs and Diagnostics" sections — shared
+// by the pre-fill-on-open behavior below and the sync-into-an-existing-plan behavior further
+// down (in PatientDetail's addRx / addLabRequest).
+function formatMedsSection(meds) {
+  if (!meds || meds.length === 0) return "";
+  const medLines = meds.map((m) => {
+    const dosing = [m.am, m.nn, m.pm].some(Boolean) ? `AM ${m.am || "0"} · NN ${m.nn || "0"} · PM ${m.pm || "0"}` : "";
+    return [
+      m.name + (m.indication ? ` (${m.indication})` : ""),
+      dosing,
+      m.remarks || "",
+    ].filter(Boolean).join(" — ");
+  });
+  return `Medications\n${medLines.join("\n")}`;
+}
+
+function formatLabsSection(labData) {
+  if (!labData) return "";
+  const items = [
+    ...(labData.tests || []),
+    ...(labData.details || []).map((d) => (d.detail ? `${d.label}: ${d.detail}` : d.label)),
+  ];
+  return items.length > 0 ? `Labs and Diagnostics\n${items.join("\n")}` : "";
+}
+
 // Builds the Plan field's starting text: a "Medications" section from the most recent
 // prescription, and a "Labs and Diagnostics" section from the most recent lab/diagnostic
 // request — each section only appears if there's actually something to show.
 function formatPlanFromRxAndLabs(rxList, labList) {
   const sections = [];
-
-  const latestRx = rxList && rxList[0];
-  if (latestRx && latestRx.meds && latestRx.meds.length > 0) {
-    const medLines = latestRx.meds.map((m) => {
-      const dosing = [m.am, m.nn, m.pm].some(Boolean) ? `AM ${m.am || "0"} · NN ${m.nn || "0"} · PM ${m.pm || "0"}` : "";
-      return [
-        m.name + (m.indication ? ` (${m.indication})` : ""),
-        dosing,
-        m.remarks || "",
-      ].filter(Boolean).join(" — ");
-    });
-    sections.push(`Medications\n${medLines.join("\n")}`);
-  }
-
-  const latestLab = labList && labList[0];
-  if (latestLab) {
-    const items = [
-      ...(latestLab.tests || []),
-      ...(latestLab.details || []).map((d) => (d.detail ? `${d.label}: ${d.detail}` : d.label)),
-    ];
-    if (items.length > 0) {
-      sections.push(`Labs and Diagnostics\n${items.join("\n")}`);
-    }
-  }
-
+  const medsSection = formatMedsSection(rxList && rxList[0] && rxList[0].meds);
+  if (medsSection) sections.push(medsSection);
+  const labsSection = formatLabsSection(labList && labList[0]);
+  if (labsSection) sections.push(labsSection);
   return sections.join("\n\n");
+}
+
+// After a treatment plan already exists for a patient, a prescription or lab request created
+// later the same day should still land in that plan's Plan field — not just ones created
+// before the plan existed. Appends rather than overwrites, so anything the doctor already
+// typed into Plan is never touched, only added to.
+function appendToSameDayPlan(treatmentPlans, patientId, dateISO, sectionText) {
+  if (!sectionText) return { treatmentPlans, matched: false };
+  const day = (dateISO || "").slice(0, 10);
+  let matched = false;
+  const updated = treatmentPlans.map((t) => {
+    if (t.patientId === patientId && (t.date || "").slice(0, 10) === day) {
+      matched = true;
+      const existing = (t.plan || "").trim();
+      return { ...t, plan: existing ? `${existing}\n\n${sectionText}` : sectionText };
+    }
+    return t;
+  });
+  return { treatmentPlans: updated, matched };
 }
 
 // Joins every chart note (newest first, same order as the Chart tab) into one block of text,
@@ -1844,9 +1865,11 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
   }
 
   async function addRx(rxData) {
-    const prescriptions = [...data.prescriptions, { ...rxData, id: uid("rx"), patientId: patient.id, date: new Date().toISOString(), provider: currentUser.name }];
-    await persist(withAudit({ ...data, prescriptions }, "prescription_created", `Prescription (${rxData.meds.length} medication${rxData.meds.length === 1 ? "" : "s"})`));
-    showToast("Prescription created");
+    const rxDate = new Date().toISOString();
+    const prescriptions = [...data.prescriptions, { ...rxData, id: uid("rx"), patientId: patient.id, date: rxDate, provider: currentUser.name }];
+    const { treatmentPlans, matched } = appendToSameDayPlan(data.treatmentPlans, patient.id, rxDate, formatMedsSection(rxData.meds));
+    await persist(withAudit({ ...data, prescriptions, treatmentPlans }, "prescription_created", `Prescription (${rxData.meds.length} medication${rxData.meds.length === 1 ? "" : "s"})`));
+    showToast(matched ? "Prescription created — added to today's treatment plan" : "Prescription created");
   }
 
   async function editRx(rxId, updates) {
@@ -1868,10 +1891,12 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
   }
 
   async function addLabRequest(labData) {
-    const labRequests = [...(data.labRequests || []), { ...labData, id: uid("lab"), patientId: patient.id, date: new Date().toISOString(), provider: currentUser.name }];
+    const labDate = new Date().toISOString();
+    const labRequests = [...(data.labRequests || []), { ...labData, id: uid("lab"), patientId: patient.id, date: labDate, provider: currentUser.name }];
     const count = labData.tests.length + labData.details.length;
-    await persist(withAudit({ ...data, labRequests }, "lab_request_created", `Lab/diagnostic request (${count} item${count === 1 ? "" : "s"})`));
-    showToast("Lab & diagnostic request saved");
+    const { treatmentPlans, matched } = appendToSameDayPlan(data.treatmentPlans, patient.id, labDate, formatLabsSection(labData));
+    await persist(withAudit({ ...data, labRequests, treatmentPlans }, "lab_request_created", `Lab/diagnostic request (${count} item${count === 1 ? "" : "s"})`));
+    showToast(matched ? "Lab request saved — added to today's treatment plan" : "Lab & diagnostic request saved");
   }
 
   async function updatePatientInfo(updated) {
