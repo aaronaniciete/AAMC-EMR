@@ -1235,7 +1235,7 @@ function Sidebar({ view, setView, currentUser, onSignOut, showToast, pendingCoun
       <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "20px 18px 16px" }}>
         <img src="/logo-icon.png" alt="" style={{ width: 26, height: 26, flexShrink: 0 }} />
         <span style={{ fontFamily: "Fraunces, serif", fontSize: 16, color: "#EAF3F1", lineHeight: 1.15 }}>
-          Alba-Aniciete
+          AAMC-Tiaong
         </span>
       </div>
       <nav style={{ display: "flex", flexDirection: "column", gap: 2, padding: "0 10px" }}>
@@ -2477,7 +2477,15 @@ function RxTab({ rx, onAddRx, onEditRx, isPeds, patient, clinicInfo, provider, c
   function pickSuggestion(i, med) {
     const slots = deriveDoseSlots(med.frequency, med.dosage);
     const remarks = buildRemarks(med.duration, med.notes);
-    setMeds((m) => m.map((row, idx) => (idx === i ? { ...row, name: med.name, am: slots.am, nn: slots.nn, pm: slots.pm, remarks, indication: med.indication || row.indication } : row)));
+    // If a weight-based dosing rule applies to this medication and the patient's weight is
+    // known, use the calculated mL instead of the medication's generic default dose — still a
+    // normal editable text field afterward, this just sets the starting value automatically.
+    const doseRule = getWeightDosingRule(med.name, dosingRules);
+    const doseCalc = doseRule ? computeWeightDose(med.name, patientWeightKg, doseRule) : null;
+    const finalSlots = doseCalc
+      ? { am: `${doseCalc.perDoseMl}mL`, nn: `${doseCalc.perDoseMl}mL`, pm: `${doseCalc.perDoseMl}mL` }
+      : slots;
+    setMeds((m) => m.map((row, idx) => (idx === i ? { ...row, name: med.name, am: finalSlots.am, nn: finalSlots.nn, pm: finalSlots.pm, remarks, indication: med.indication || row.indication } : row)));
     setOpenSuggestRow(null);
   }
 
@@ -2600,11 +2608,11 @@ function RxTab({ rx, onAddRx, onEditRx, isPeds, patient, clinicInfo, provider, c
                   <div style={styles.doseHint}>
                     {doseCalc ? (
                       <>
-                        <b>Weight-based dose suggestion:</b> {dosingRuleLabel(doseRule)} × {patientWeightKg}kg
+                        <b>Weight-based dose — already applied to AM/NN/PM:</b> {dosingRuleLabel(doseRule)} × {patientWeightKg}kg
                         {" "}= {doseCalc.totalDailyMg}mg/day ({doseCalc.concentrationLabel} formulation)
                         {" "}→ <b>{doseCalc.perDoseMl}mL per dose</b>
                         <button type="button" style={styles.doseHintBtn} onClick={() => applyWeightDose(i, doseCalc.perDoseMl)}>
-                          Use for AM/NN/PM
+                          Reapply to AM/NN/PM
                         </button>
                       </>
                     ) : !doseRule.mgPerKgPerDay || !doseRule.everyHours ? (
@@ -2619,7 +2627,7 @@ function RxTab({ rx, onAddRx, onEditRx, isPeds, patient, clinicInfo, provider, c
                       </>
                     )}
                     <div style={{ fontSize: 10.5, color: "#8A9793", marginTop: 3 }}>
-                      Calculated, not a substitute for clinical judgment — please verify before prescribing.
+                      Calculated and filled in automatically — still fully editable above, and not a substitute for clinical judgment.
                     </div>
                   </div>
                 )}
