@@ -393,27 +393,13 @@ async function loadAllStaffProfiles() {
   return data || [];
 }
 async function loadMyProfile(userId) {
-  const { data, error } = await supabase.from("staff_profiles").select("id, name, role, pin_hash").eq("id", userId).maybeSingle();
+  const { data, error } = await supabase.from("staff_profiles").select("id, name, role").eq("id", userId).maybeSingle();
   if (error) { console.error("loadMyProfile failed", error); return null; }
   return data;
 }
 async function saveMyProfile(userId, name, role) {
   const { error } = await supabase.from("staff_profiles").upsert({ id: userId, name, role });
   if (error) console.error("saveMyProfile failed", error);
-}
-// Hashes a PIN with SHA-256 before it's ever stored or compared — the raw digits are never sent
-// anywhere or kept in state. A 4-digit PIN only has 10,000 possible values, so this protects
-// against a casual glance at the stored data, not against someone deliberately trying every
-// combination against a copy of the hash — it's meant as a fast convenience check, not a
-// replacement for the account password itself.
-async function hashPin(pin) {
-  const enc = new TextEncoder().encode(pin);
-  const digest = await crypto.subtle.digest("SHA-256", enc);
-  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-async function saveMyPinHash(userId, pinHash) {
-  const { error } = await supabase.from("staff_profiles").update({ pin_hash: pinHash }).eq("id", userId);
-  if (error) console.error("saveMyPinHash failed", error);
 }
 async function loadCommonMeds() {
   const { data, error } = await supabase.from("app_state").select("value").eq("key", "common-meds").maybeSingle();
@@ -581,13 +567,6 @@ const defaultDosingRules = () => [
 const CLINICAL_EDIT_ROLES = ["Nurse", "Physician", "Pediatrician"];
 function canEditClinical(role) {
   return CLINICAL_EDIT_ROLES.includes(role);
-}
-// Electronic signing is narrower than general clinical editing — a Nurse can draft a
-// prescription, lab request, or certificate, but only the licensed prescriber roles can
-// electronically sign it as final.
-const SIGNING_ROLES = ["Physician", "Pediatrician"];
-function canSignDocuments(role) {
-  return SIGNING_ROLES.includes(role);
 }
 
 function dosesPerDayFor(everyHours) {
@@ -850,16 +829,6 @@ export default function ClinicEMR() {
     setTimeout(() => setToast(null), 2200);
   }, []);
 
-  // Lets a Physician/Pediatrician set or change their own signing PIN. Hashes it before it ever
-  // leaves the browser and updates local state immediately so it's usable right away, without
-  // needing to sign out and back in.
-  const setMyPin = useCallback(async (pin) => {
-    const hash = await hashPin(pin);
-    await saveMyPinHash(userId, hash);
-    setMyProfile((prev) => (prev ? { ...prev, pin_hash: hash } : prev));
-    showToast("Signing PIN saved");
-  }, [userId, showToast]);
-
   const persistCommonMeds = useCallback(async (next) => {
     setCommonMeds(next);
     await saveCommonMeds(next);
@@ -1052,7 +1021,6 @@ export default function ClinicEMR() {
         onSignOut={() => supabase.auth.signOut()}
         showToast={showToast}
         pendingCount={pendingRegistrations.length}
-        onSetPin={setMyPin}
       />
       <main style={styles.main}>
         <TopBar currentUser={currentUser} />
@@ -1283,9 +1251,8 @@ function PrivacyBanner() {
 }
 
 /* ---------------- Sidebar ---------------- */
-function Sidebar({ view, setView, currentUser, onSignOut, showToast, pendingCount, onSetPin }) {
+function Sidebar({ view, setView, currentUser, onSignOut, showToast, pendingCount }) {
   const [showChangePassword, setShowChangePassword] = useState(false);
-  const [showPinSetup, setShowPinSetup] = useState(false);
   const items = [
     { key: "dashboard", label: "Dashboard", icon: Home },
     { key: "schedule", label: "Schedule", icon: CalendarDays },
@@ -1322,11 +1289,6 @@ function Sidebar({ view, setView, currentUser, onSignOut, showToast, pendingCoun
       <div style={{ marginTop: "auto", padding: 14, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
         <div style={{ fontSize: 12.5, color: "#B9CBC8" }}>{currentUser.name}</div>
         <div style={{ fontSize: 11, color: "#7E948F", marginBottom: 8 }}>{currentUser.role}</div>
-        {canSignDocuments(currentUser.role) && (
-          <button onClick={() => setShowPinSetup(true)} style={{ ...styles.signOutBtn, marginBottom: 6 }}>
-            <Check size={14} /> {currentUser.pin_hash ? "Change signing PIN" : "Set signing PIN"}
-          </button>
-        )}
         <button onClick={() => setShowChangePassword(true)} style={{ ...styles.signOutBtn, marginBottom: 6 }}>
           <Lock size={14} /> Change password
         </button>
@@ -1336,13 +1298,6 @@ function Sidebar({ view, setView, currentUser, onSignOut, showToast, pendingCoun
       </div>
       {showChangePassword && (
         <ChangePasswordModal onClose={() => setShowChangePassword(false)} showToast={showToast} />
-      )}
-      {showPinSetup && (
-        <PinSetupModal
-          hasPinSet={!!currentUser.pin_hash}
-          onClose={() => setShowPinSetup(false)}
-          onSave={onSetPin}
-        />
       )}
     </aside>
   );
@@ -1408,75 +1363,6 @@ function ChangePasswordModal({ onClose, showToast }) {
         disabled={saving}
       >
         {saving ? "Saving…" : "Save new password"}
-      </button>
-    </Modal>
-  );
-}
-
-// Lets a Physician/Pediatrician set or change the 4-digit PIN they use to electronically sign
-// prescriptions, certificates, and lab requests. Separate from their account password by design
-// — this is a fast, low-friction confirmation for a routine action, not account security itself.
-function PinSetupModal({ hasPinSet, onClose, onSave }) {
-  const [pin, setPin] = useState("");
-  const [confirmPin, setConfirmPin] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  async function save() {
-    setErrorMsg("");
-    if (pin.length !== 4) {
-      setErrorMsg("PIN must be exactly 4 digits.");
-      return;
-    }
-    if (pin !== confirmPin) {
-      setErrorMsg("PINs don't match.");
-      return;
-    }
-    setSaving(true);
-    await onSave(pin);
-    setSaving(false);
-    onClose();
-  }
-
-  return (
-    <Modal title={hasPinSet ? "Change signing PIN" : "Set signing PIN"} onClose={onClose}>
-      <div style={{ fontSize: 12.5, color: "#5B6B68", marginBottom: 14, lineHeight: 1.6 }}>
-        This PIN is what you'll enter to electronically sign a prescription, certificate, or lab
-        request — separate from your login password, and quick to type between patients. Since
-        it's only 4 digits, it's meant for fast confirmation, not as strong a safeguard as your
-        actual password.
-      </div>
-      <Field label="New 4-digit PIN">
-        <input
-          type="password"
-          inputMode="numeric"
-          maxLength={4}
-          style={{ ...styles.input, fontSize: 20, letterSpacing: 8, textAlign: "center" }}
-          value={pin}
-          onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
-          placeholder="••••"
-        />
-      </Field>
-      <div style={{ height: 10 }} />
-      <Field label="Confirm new PIN">
-        <input
-          type="password"
-          inputMode="numeric"
-          maxLength={4}
-          style={{ ...styles.input, fontSize: 20, letterSpacing: 8, textAlign: "center" }}
-          value={confirmPin}
-          onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
-          placeholder="••••"
-          onKeyDown={(e) => e.key === "Enter" && save()}
-        />
-      </Field>
-      {errorMsg && <div style={{ color: "#B23B3B", fontSize: 12.5, marginTop: 10 }}>{errorMsg}</div>}
-      <button
-        style={{ ...styles.primaryBtn, justifyContent: "center", width: "100%", marginTop: 14 }}
-        onClick={save}
-        disabled={saving || pin.length !== 4}
-      >
-        {saving ? "Saving…" : "Save PIN"}
       </button>
     </Modal>
   );
@@ -2041,9 +1927,7 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
 
   async function editRx(rxId, updates) {
     const existing = data.prescriptions.find((r) => r.id === rxId);
-    // Editing clears any prior electronic signature — it was a confirmation of the OLD content,
-    // which no longer applies once the medications change. Re-signing after an edit is required.
-    const prescriptions = data.prescriptions.map((r) => (r.id === rxId ? { ...r, ...updates, signedBy: null, signedAt: null } : r));
+    const prescriptions = data.prescriptions.map((r) => (r.id === rxId ? { ...r, ...updates } : r));
     const { treatmentPlans, matched } = appendToSameDayPlan(data.treatmentPlans, patient.id, existing && existing.date, formatMedsSection(updates.meds));
     await persist(withAudit({ ...data, prescriptions, treatmentPlans }, "prescription_edited", `Edited a prescription (${updates.meds.length} medication${updates.meds.length === 1 ? "" : "s"})`));
     showToast(matched ? "Prescription updated — added to that day's treatment plan" : "Prescription updated");
@@ -2072,29 +1956,11 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
 
   async function editLabRequest(labId, updates) {
     const existing = (data.labRequests || []).find((l) => l.id === labId);
-    // Same reasoning as editRx — an edit invalidates any prior signature on this document.
-    const labRequests = (data.labRequests || []).map((l) => (l.id === labId ? { ...l, ...updates, signedBy: null, signedAt: null } : l));
+    const labRequests = (data.labRequests || []).map((l) => (l.id === labId ? { ...l, ...updates } : l));
     const count = updates.tests.length + updates.details.length;
     const { treatmentPlans, matched } = appendToSameDayPlan(data.treatmentPlans, patient.id, existing && existing.date, formatLabsSection(updates));
     await persist(withAudit({ ...data, labRequests, treatmentPlans }, "lab_request_edited", `Edited a lab/diagnostic request (${count} item${count === 1 ? "" : "s"})`));
     showToast(matched ? "Lab request updated — added to that day's treatment plan" : "Lab request updated");
-  }
-
-  // Electronically signs a prescription, certificate, or lab request — only reachable by
-  // Physician/Pediatrician roles (enforced again here, not just in the UI, since this function
-  // is the one that actually writes the signature). Verifies the entered PIN against the
-  // signed-in physician's own stored hash; never against anyone else's.
-  async function signDocument(docType, docId, pin) {
-    if (!canSignDocuments(currentUser.role)) return { ok: false, reason: "not-a-signer" };
-    if (!currentUser.pin_hash) return { ok: false, reason: "no-pin" };
-    const enteredHash = await hashPin(pin);
-    if (enteredHash !== currentUser.pin_hash) return { ok: false, reason: "wrong-pin" };
-    const signedBy = currentUser.name;
-    const signedAt = new Date().toISOString();
-    const list = (data[docType] || []).map((item) => (item.id === docId ? { ...item, signedBy, signedAt } : item));
-    await persist(withAudit({ ...data, [docType]: list }, `${docType}_signed`, `Electronically signed by ${signedBy}`));
-    showToast(`Signed by ${signedBy}`);
-    return { ok: true };
   }
 
   async function updatePatientInfo(updated) {
@@ -2160,7 +2026,7 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
 
       {tab === "chart" && <ChartTab history={history} onAddNote={addNote} onEditNote={editNote} />}
       {tab === "plans" && <PlansTab plans={plans} onAddPlan={addPlan} onEditPlan={editPlan} onOrderLabs={goOrderLabs} history={history} rx={rx} labRequests={labRequests} icdCodes={icdCodes} />}
-      {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} onEditRx={editRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} commonMeds={commonMeds} rxTemplates={rxTemplates} history={history} dosingRules={dosingRules} userRole={currentUser.role} onSignDocument={signDocument} hasPinSet={!!currentUser.pin_hash} />}
+      {tab === "rx" && <RxTab rx={rx} onAddRx={addRx} onEditRx={editRx} isPeds={isPeds} patient={patient} clinicInfo={clinicInfo} provider={currentUser.name} commonMeds={commonMeds} rxTemplates={rxTemplates} history={history} dosingRules={dosingRules} userRole={currentUser.role} />}
       {tab === "forms" && (
         <FormsTab
           certs={certs}
@@ -2181,8 +2047,6 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
           plans={plans}
           userRole={currentUser.role}
           icdCodes={icdCodes}
-          onSignDocument={signDocument}
-          hasPinSet={!!currentUser.pin_hash}
         />
       )}
       {tab === "visitHistory" && <VisitHistoryTab history={history} plans={plans} rx={rx} certs={certs} exams={exams} labRequests={labRequests} />}
@@ -2598,14 +2462,13 @@ function SoapLine({ label, text, bold }) {
   );
 }
 
-function RxTab({ rx, onAddRx, onEditRx, isPeds, patient, clinicInfo, provider, commonMeds, rxTemplates, history, dosingRules, userRole, onSignDocument, hasPinSet }) {
+function RxTab({ rx, onAddRx, onEditRx, isPeds, patient, clinicInfo, provider, commonMeds, rxTemplates, history, dosingRules, userRole }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [meds, setMeds] = useState([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "", indication: "" }]);
   const [notes, setNotes] = useState("");
   const [openSuggestRow, setOpenSuggestRow] = useState(null);
   const [printRx, setPrintRx] = useState(null);
-  const [signingId, setSigningId] = useState(null);
 
   const medList = commonMeds;
   const templateList = rxTemplates;
@@ -2844,11 +2707,6 @@ function RxTab({ rx, onAddRx, onEditRx, isPeds, patient, clinicInfo, provider, c
                         <Pencil size={12} /> Edit
                       </button>
                     )}
-                    {canSignDocuments(userRole) && !r.signedBy && (
-                      <button style={styles.linkBtn} onClick={() => setSigningId(r.id)}>
-                        <Check size={13} /> Sign
-                      </button>
-                    )}
                     <button style={styles.linkBtn} onClick={() => handlePrint(r)}>
                       <FileText size={13} /> Print
                     </button>
@@ -2862,21 +2720,11 @@ function RxTab({ rx, onAddRx, onEditRx, isPeds, patient, clinicInfo, provider, c
                   ))}
                 </div>
                 {r.notes && <div style={{ fontSize: 12.5, color: "#5B6B68", marginTop: 6 }}>{r.notes}</div>}
-                {r.signedBy && <div style={{ marginTop: 6 }}><SignedBadge signedBy={r.signedBy} signedAt={r.signedAt} /></div>}
               </div>
             ))}
           </div>
         )}
       </SectionCard>
-
-      {signingId && (
-        <SignDocumentModal
-          docLabel="prescription"
-          hasPinSet={hasPinSet}
-          onClose={() => setSigningId(null)}
-          onConfirm={(pin) => onSignDocument("prescriptions", signingId, pin)}
-        />
-      )}
 
       <div id="rx-print-area">
         {printRx && <PrintableRx rx={printRx} patient={patient} clinicInfo={clinicInfo} provider={printRx.provider || provider} vitals={getLatestVitals(history)} />}
@@ -2961,17 +2809,12 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
           <div style={{ fontSize: 7.5 }}>Medical Doctor</div>
         </div>
       </div>
-      {rx.signedBy && (
-        <div style={{ fontSize: 6.5, color: "#0F5E56", marginTop: 4, textAlign: "right" }}>
-          Electronically signed by {rx.signedBy} — {fmtDateTime(rx.signedAt)}
-        </div>
-      )}
     </div>
   );
 }
 
 /* ---------------- Forms (Medical Certificate, etc.) ---------------- */
-function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAddLabRequest, onEditLabRequest, patient, clinicInfo, provider, jumpTo, onJumped, labTemplates, persistLabTemplates, showToast, plans, userRole, icdCodes, onSignDocument, hasPinSet }) {
+function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAddLabRequest, onEditLabRequest, patient, clinicInfo, provider, jumpTo, onJumped, labTemplates, persistLabTemplates, showToast, plans, userRole, icdCodes }) {
   const [formType, setFormType] = useState("cert");
   const [autoOpenLabs, setAutoOpenLabs] = useState(false);
 
@@ -3006,7 +2849,7 @@ function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAd
         </button>
       </div>
       {formType === "cert" && (
-        <MedCertSection certs={certs} onAddCertificate={onAddCertificate} patient={patient} clinicInfo={clinicInfo} provider={provider} plans={plans} icdCodes={icdCodes} userRole={userRole} onSignDocument={onSignDocument} hasPinSet={hasPinSet} />
+        <MedCertSection certs={certs} onAddCertificate={onAddCertificate} patient={patient} clinicInfo={clinicInfo} provider={provider} plans={plans} icdCodes={icdCodes} />
       )}
       {formType === "exam" && (
         <PhysicalExamSection exams={exams} onAddExam={onAddExam} patient={patient} clinicInfo={clinicInfo} provider={provider} />
@@ -3025,22 +2868,19 @@ function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAd
           persistLabTemplates={persistLabTemplates}
           showToast={showToast}
           userRole={userRole}
-          onSignDocument={onSignDocument}
-          hasPinSet={hasPinSet}
         />
       )}
     </div>
   );
 }
 
-function MedCertSection({ certs, onAddCertificate, patient, clinicInfo, provider, plans, icdCodes, userRole, onSignDocument, hasPinSet }) {
+function MedCertSection({ certs, onAddCertificate, patient, clinicInfo, provider, plans, icdCodes }) {
   const [showForm, setShowForm] = useState(false);
   const [examDate, setExamDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [reason, setReason] = useState("");
   const [assessment, setAssessment] = useState("");
   const [recommendation, setRecommendation] = useState("");
   const [printCert, setPrintCert] = useState(null);
-  const [signingId, setSigningId] = useState(null);
 
   const latestDiagnosis = (plans && plans[0] && (plans[0].assessment || plans[0].diagnosis)) || "";
 
@@ -3124,36 +2964,19 @@ function MedCertSection({ certs, onAddCertificate, patient, clinicInfo, provider
               <div key={c.id} style={styles.entryCard}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div style={styles.entryDate}>{fmtDateTime(c.date)} · {c.provider}</div>
-                  <div style={{ display: "flex", gap: 10 }}>
-                    {canSignDocuments(userRole) && !c.signedBy && (
-                      <button style={styles.linkBtn} onClick={() => setSigningId(c.id)}>
-                        <Check size={13} /> Sign
-                      </button>
-                    )}
-                    <button style={styles.linkBtn} onClick={() => handlePrint(c)}>
-                      <FileText size={13} /> Print
-                    </button>
-                  </div>
+                  <button style={styles.linkBtn} onClick={() => handlePrint(c)}>
+                    <FileText size={13} /> Print
+                  </button>
                 </div>
                 <div style={{ fontSize: 13.5, color: "#12312D", marginTop: 4 }}>
                   Examined {fmtDate(c.examDate)}{c.reason ? ` for ${c.reason}` : ""}
                 </div>
                 {c.assessment && <div style={{ fontSize: 12.5, color: "#5B6B68", marginTop: 4 }}>{c.assessment}</div>}
-                {c.signedBy && <div style={{ marginTop: 6 }}><SignedBadge signedBy={c.signedBy} signedAt={c.signedAt} /></div>}
               </div>
             ))}
           </div>
         )}
       </SectionCard>
-
-      {signingId && (
-        <SignDocumentModal
-          docLabel="medical certificate"
-          hasPinSet={hasPinSet}
-          onClose={() => setSigningId(null)}
-          onConfirm={(pin) => onSignDocument("certificates", signingId, pin)}
-        />
-      )}
 
       <div id="cert-print-area">
         {printCert && <PrintableMedCert cert={printCert} patient={patient} clinicInfo={clinicInfo} provider={printCert.provider || provider} />}
@@ -3670,11 +3493,6 @@ function PrintableMedCert({ cert, patient, clinicInfo, provider }) {
           <div style={{ fontSize: 11 }}>Medical Doctor</div>
         </div>
       </div>
-      {cert.signedBy && (
-        <div style={{ fontSize: 10, color: "#0F5E56", marginTop: 4, textAlign: "right" }}>
-          Electronically signed by {cert.signedBy} — {fmtDateTime(cert.signedAt)}
-        </div>
-      )}
 
       <div style={{ fontSize: 12, fontWeight: 700, marginTop: 26 }}>*Not valid without dry seal</div>
     </div>
@@ -3801,7 +3619,7 @@ function LabTemplateManager({ labTemplates, persistLabTemplates, onClose, showTo
   );
 }
 
-function LabRequestSection({ labRequests, onAddLabRequest, onEditLabRequest, patient, clinicInfo, provider, autoOpen, onAutoOpened, labTemplates, persistLabTemplates, showToast, userRole, onSignDocument, hasPinSet }) {
+function LabRequestSection({ labRequests, onAddLabRequest, onEditLabRequest, patient, clinicInfo, provider, autoOpen, onAutoOpened, labTemplates, persistLabTemplates, showToast, userRole }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [checks, setChecks] = useState({});
@@ -3809,7 +3627,6 @@ function LabRequestSection({ labRequests, onAddLabRequest, onEditLabRequest, pat
   const [detailText, setDetailText] = useState({}); // Xray/Ultrasound/CT-Scan/Others -> free text
   const [printLab, setPrintLab] = useState(null);
   const [showTemplateManager, setShowTemplateManager] = useState(false);
-  const [signingId, setSigningId] = useState(null);
 
   useEffect(() => {
     if (autoOpen) {
@@ -3945,11 +3762,6 @@ function LabRequestSection({ labRequests, onAddLabRequest, onEditLabRequest, pat
                         <Pencil size={12} /> Edit
                       </button>
                     )}
-                    {canSignDocuments(userRole) && !l.signedBy && (
-                      <button style={styles.linkBtn} onClick={() => setSigningId(l.id)}>
-                        <Check size={13} /> Sign
-                      </button>
-                    )}
                     <button style={styles.linkBtn} onClick={() => handlePrint(l)}>
                       <FileText size={13} /> Print
                     </button>
@@ -3958,21 +3770,11 @@ function LabRequestSection({ labRequests, onAddLabRequest, onEditLabRequest, pat
                 <div style={{ fontSize: 13, color: "#12312D", marginTop: 4 }}>
                   {[...l.tests, ...l.details.map((d) => (d.detail ? `${d.label}: ${d.detail}` : d.label))].join(", ")}
                 </div>
-                {l.signedBy && <div style={{ marginTop: 6 }}><SignedBadge signedBy={l.signedBy} signedAt={l.signedAt} /></div>}
               </div>
             ))}
           </div>
         )}
       </SectionCard>
-
-      {signingId && (
-        <SignDocumentModal
-          docLabel="lab & diagnostic request"
-          hasPinSet={hasPinSet}
-          onClose={() => setSigningId(null)}
-          onConfirm={(pin) => onSignDocument("labRequests", signingId, pin)}
-        />
-      )}
 
       <div id="lab-print-area">
         {printLab && <PrintableLabRequest lab={printLab} patient={patient} clinicInfo={clinicInfo} provider={printLab.provider || provider} />}
@@ -4034,11 +3836,6 @@ function PrintableLabRequest({ lab, patient, clinicInfo, provider }) {
           <div style={{ fontSize: 7.5 }}>License No. _____________</div>
         </div>
       </div>
-      {lab.signedBy && (
-        <div style={{ fontSize: 6.5, color: "#0F5E56", marginTop: 4, textAlign: "right" }}>
-          Electronically signed by {lab.signedBy} — {fmtDateTime(lab.signedAt)}
-        </div>
-      )}
     </div>
   );
 }
@@ -4853,76 +4650,6 @@ function Modal({ title, onClose, children }) {
         </div>
         {children}
       </div>
-    </div>
-  );
-}
-
-// PIN entry for electronically signing a prescription, certificate, or lab request. Shared by
-// all three, distinguished only by docLabel for the on-screen wording.
-function SignDocumentModal({ docLabel, hasPinSet, onConfirm, onClose }) {
-  const [pin, setPin] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function handleConfirm() {
-    if (pin.length !== 4) { setError("Enter your 4-digit PIN."); return; }
-    setBusy(true);
-    setError("");
-    const result = await onConfirm(pin);
-    setBusy(false);
-    if (result && result.ok) {
-      onClose();
-    } else {
-      setError(result && result.reason === "wrong-pin" ? "That PIN doesn't match — try again." : "Couldn't sign — please try again.");
-      setPin("");
-    }
-  }
-
-  if (!hasPinSet) {
-    return (
-      <Modal title={`Sign ${docLabel}`} onClose={onClose}>
-        <div style={{ fontSize: 13.5, color: "#5B6B68", lineHeight: 1.6 }}>
-          You haven't set up a signing PIN yet. Close this, go to <b>Set signing PIN</b> near the
-          bottom of the sidebar, set one up, then come back to sign this {docLabel}.
-        </div>
-      </Modal>
-    );
-  }
-
-  return (
-    <Modal title={`Sign ${docLabel}`} onClose={onClose}>
-      <div style={{ fontSize: 13.5, color: "#5B6B68", marginBottom: 12 }}>
-        Enter your 4-digit signing PIN to confirm this {docLabel} as final. This locks in a
-        timestamped record of your signature.
-      </div>
-      <input
-        type="password"
-        inputMode="numeric"
-        maxLength={4}
-        value={pin}
-        onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
-        onKeyDown={(e) => e.key === "Enter" && handleConfirm()}
-        style={{ ...styles.input, fontSize: 22, letterSpacing: 10, textAlign: "center" }}
-        placeholder="••••"
-        autoFocus
-      />
-      {error && <div style={{ color: "#B23B3B", fontSize: 12.5, marginTop: 8 }}>{error}</div>}
-      <button
-        style={{ ...styles.primaryBtn, justifyContent: "center", marginTop: 14, width: "100%" }}
-        onClick={handleConfirm}
-        disabled={busy || pin.length !== 4}
-      >
-        <Check size={15} /> {busy ? "Signing…" : "Confirm signature"}
-      </button>
-    </Modal>
-  );
-}
-
-// Small inline indicator shown once a document has been electronically signed.
-function SignedBadge({ signedBy, signedAt }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "#0F5E56", fontWeight: 600 }}>
-      <Check size={13} /> Signed by {signedBy} · {fmtDateTime(signedAt)}
     </div>
   );
 }
