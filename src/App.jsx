@@ -2739,76 +2739,78 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
   const today = new Date(rx.date || Date.now());
   const v = vitals || {};
   return (
-    <div style={printStylesRx.page}>
-      <div style={printStylesRx.headerRow}>
-        <div style={printStylesRx.logoCircle}>
-          <Stethoscope size={11} color="#0F5E56" />
+    <div style={printStylesHalf.page}>
+      <div style={printStylesHalf.headerRow}>
+        <div style={printStylesHalf.logoCircle}>
+          <Stethoscope size={16} color="#0F5E56" />
         </div>
         <div>
-          <div style={printStylesRx.clinicName}>{clinicInfo.name}</div>
-          <div style={printStylesRx.clinicSub}>{clinicInfo.address}</div>
-          <div style={printStylesRx.clinicSub}>{clinicInfo.phone}</div>
+          <div style={printStylesHalf.clinicName}>{clinicInfo.name}</div>
+          <div style={printStylesHalf.clinicSub}>{clinicInfo.address}</div>
+          <div style={printStylesHalf.clinicSub}>{clinicInfo.phone}</div>
         </div>
       </div>
 
-      <div style={printStylesRx.fieldsRow}>
-        <div style={printStylesRx.fieldsCol}>
-          <div style={printStylesRx.fieldLine}><b>Name:</b> {patient.name}</div>
-          <div style={printStylesRx.fieldLine}><b>Address:</b> {patient.address || ""}</div>
-          <div style={printStylesRx.fieldLine}><b>Contact No:</b> {patient.contact || ""}</div>
+      <div style={printStylesHalf.fieldsRow}>
+        <div style={printStylesHalf.fieldsCol}>
+          <div style={printStylesHalf.fieldLine}><b>Name:</b> {patient.name}</div>
+          <div style={printStylesHalf.fieldLine}><b>Address:</b> {patient.address || ""}</div>
+          <div style={printStylesHalf.fieldLine}><b>Contact No:</b> {patient.contact || ""}</div>
         </div>
-        <div style={printStylesRx.fieldsCol}>
-          <div style={printStylesRx.fieldLine}><b>Date:</b> {fmtDate(today)}</div>
-          <div style={printStylesRx.fieldLine}><b>Age/Sex:</b> {age !== null ? age : "—"} / {(patient.sex || "").slice(0, 1)}</div>
-          <div style={printStylesRx.fieldLine}>
+        <div style={printStylesHalf.fieldsCol}>
+          <div style={printStylesHalf.fieldLine}><b>Date:</b> {fmtDate(today)}</div>
+          <div style={printStylesHalf.fieldLine}><b>Age/Sex:</b> {age !== null ? age : "—"} / {(patient.sex || "").slice(0, 1)}</div>
+          <div style={printStylesHalf.fieldLine}>
             <b>BP:</b> {v.bp || "____"} &nbsp; <b>Temp:</b> {v.temp || "___"} &nbsp; <b>Wt:</b> {v.weight || "___"}
           </div>
         </div>
       </div>
 
-      <div style={printStylesRx.rxMark}>R<span style={{ fontSize: "0.6em" }}>x</span></div>
+      <div style={printStylesHalf.rxMark}>R<span style={{ fontSize: "0.6em" }}>x</span></div>
 
-      <table style={printStylesRx.table}>
+      <table style={printStylesHalf.table}>
         <thead>
           <tr>
-            <th style={{ ...printStylesRx.th, width: 14 }}>No</th>
-            <th style={printStylesRx.th}>Medications and Dosage</th>
-            <th style={{ ...printStylesRx.th, width: 14 }}>AM</th>
-            <th style={{ ...printStylesRx.th, width: 14 }}>NN</th>
-            <th style={{ ...printStylesRx.th, width: 14 }}>PM</th>
-            <th style={{ ...printStylesRx.th, width: 55 }}>Remarks</th>
+            <th style={{ ...printStylesHalf.th, width: 14 }}>No</th>
+            <th style={printStylesHalf.th}>Medications and Dosage</th>
+            <th style={{ ...printStylesHalf.th, width: 14 }}>AM</th>
+            <th style={{ ...printStylesHalf.th, width: 14 }}>NN</th>
+            <th style={{ ...printStylesHalf.th, width: 14 }}>PM</th>
+            <th style={{ ...printStylesHalf.th, width: 55 }}>Remarks</th>
           </tr>
         </thead>
         <tbody>
           {rx.meds.map((m, i) => (
             <tr key={i}>
-              <td style={printStylesRx.tdCenter}>{m.qty || ""}</td>
-              <td style={printStylesRx.td}>
+              <td style={printStylesHalf.tdCenter}>{m.qty || ""}</td>
+              <td style={printStylesHalf.td}>
                 {m.name}
-                {m.indication && <div style={{ fontSize: 6, marginTop: 1 }}>({m.indication})</div>}
+                {m.indication && <div style={{ fontSize: 7, marginTop: 1 }}>({m.indication})</div>}
               </td>
-              <td style={printStylesRx.tdCenter}>{m.am || ""}</td>
-              <td style={printStylesRx.tdCenter}>{m.nn || ""}</td>
-              <td style={printStylesRx.tdCenter}>{m.pm || ""}</td>
-              <td style={printStylesRx.td}>{m.remarks || ""}</td>
+              <td style={printStylesHalf.tdCenter}>{m.am || ""}</td>
+              <td style={printStylesHalf.tdCenter}>{m.nn || ""}</td>
+              <td style={printStylesHalf.tdCenter}>{m.pm || ""}</td>
+              <td style={printStylesHalf.td}>{m.remarks || ""}</td>
             </tr>
           ))}
         </tbody>
       </table>
 
       {rx.notes && (
-        <div style={{ fontSize: 6.5, marginTop: 5 }}>
+        <div style={{ fontSize: 8, marginTop: 5 }}>
           <b>Notes:</b> {rx.notes}
         </div>
       )}
 
-      <div style={printStylesRx.footerRow}>
-        <div style={printStylesRx.followUp}>Follow-up: ________, {today.getFullYear()}</div>
-        <div style={printStylesRx.signatureBlock}>
-          <div style={printStylesRx.signatureLine}>{provider}</div>
-          <div style={{ fontSize: 6 }}>Medical Doctor</div>
+      <div style={printStylesHalf.footerRow}>
+        <div style={printStylesHalf.followUp}>Follow-up: ________, {today.getFullYear()}</div>
+        <div style={printStylesHalf.signatureBlock}>
+          <div style={printStylesHalf.signatureLine}>{provider}</div>
+          <div style={{ fontSize: 7.5 }}>Medical Doctor</div>
         </div>
       </div>
+
+      <div style={printStylesHalf.cutGuide}>✂ cut here — top half of an A4 sheet</div>
     </div>
   );
 }
@@ -3794,48 +3796,50 @@ function PrintableLabRequest({ lab, patient, clinicInfo, provider }) {
   const colB = LAB_TEST_CHECKLIST.slice(half);
 
   return (
-    <div style={printStyles.page}>
-      <div style={printStyles.headerRow}>
-        <div style={printStyles.logoCircle}>
-          <Stethoscope size={26} color="#0F5E56" />
+    <div style={printStylesHalf.page}>
+      <div style={printStylesHalf.headerRow}>
+        <div style={printStylesHalf.logoCircle}>
+          <Stethoscope size={16} color="#0F5E56" />
         </div>
         <div>
-          <div style={printStyles.clinicName}>{clinicInfo.name}</div>
-          <div style={printStyles.clinicSub}>{clinicInfo.address}</div>
-          <div style={printStyles.clinicSub}>Contact number {clinicInfo.phone}</div>
+          <div style={printStylesHalf.clinicName}>{clinicInfo.name}</div>
+          <div style={printStylesHalf.clinicSub}>{clinicInfo.address}</div>
+          <div style={printStylesHalf.clinicSub}>Contact number {clinicInfo.phone}</div>
         </div>
       </div>
 
-      <div style={{ ...printStyles.certTitle, letterSpacing: 2 }}>LABORATORY AND DIAGNOSTIC REQUEST</div>
+      <div style={{ ...printStylesHalf.certTitle, letterSpacing: 1 }}>LABORATORY AND DIAGNOSTIC REQUEST</div>
 
-      <div style={{ fontSize: 12.5, marginTop: 16 }}>
-        Name: <Blank minWidth={320}>{patient.name}</Blank> &nbsp;&nbsp; Date: <Blank minWidth={110}>{fmtDate(issueDate)}</Blank>
+      <div style={{ fontSize: 8.5, marginTop: 8 }}>
+        Name: <Blank minWidth={200}>{patient.name}</Blank> &nbsp;&nbsp; Date: <Blank minWidth={70}>{fmtDate(issueDate)}</Blank>
       </div>
-      <div style={{ fontSize: 12.5, marginTop: 10 }}>
-        Address: <Blank minWidth={320}>{patient.address || ""}</Blank> &nbsp;&nbsp; Age/Sex: <Blank minWidth={90}>{age !== null ? `${age}` : ""}{age !== null && patient.sex ? " / " : ""}{(patient.sex || "").slice(0, 1)}</Blank>
+      <div style={{ fontSize: 8.5, marginTop: 5 }}>
+        Address: <Blank minWidth={200}>{patient.address || ""}</Blank> &nbsp;&nbsp; Age/Sex: <Blank minWidth={55}>{age !== null ? `${age}` : ""}{age !== null && patient.sex ? " / " : ""}{(patient.sex || "").slice(0, 1)}</Blank>
       </div>
 
-      <div style={{ display: "flex", gap: 30, marginTop: 20 }}>
+      <div style={{ display: "flex", gap: 18, marginTop: 8 }}>
         {[colA, colB].map((col, ci) => (
-          <div key={ci} style={{ flex: 1, fontSize: 12.5, lineHeight: 1.9 }}>
+          <div key={ci} style={{ flex: 1, fontSize: 8, lineHeight: 1.5 }}>
             {col.map((t) => (
               <div key={t}>{checkedSet.has(t) ? "☑" : "☐"} {t}</div>
             ))}
             {ci === 1 && LAB_TEST_WITH_DETAIL.map((label) => (
               <div key={label}>
-                {detailChecked(detailMap, label) ? "☑" : "☐"} {label}: <Blank minWidth={110}>{detailMap[label] || ""}</Blank>
+                {detailChecked(detailMap, label) ? "☑" : "☐"} {label}: <Blank minWidth={65}>{detailMap[label] || ""}</Blank>
               </div>
             ))}
           </div>
         ))}
       </div>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 44 }}>
-        <div style={printStyles.signatureBlock}>
-          <div style={printStyles.signatureLine}>{provider}, MD</div>
-          <div style={{ fontSize: 11 }}>License No. _____________</div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+        <div style={printStylesHalf.signatureBlock}>
+          <div style={printStylesHalf.signatureLine}>{provider}, MD</div>
+          <div style={{ fontSize: 7.5 }}>License No. _____________</div>
         </div>
       </div>
+
+      <div style={printStylesHalf.cutGuide}>✂ cut here — top half of an A4 sheet</div>
     </div>
   );
 }
@@ -4723,9 +4727,14 @@ const globalCss = `
     #rx-print-area, #rx-print-area *, #cert-print-area, #cert-print-area *, #exam-print-area, #exam-print-area *, #lab-print-area, #lab-print-area * { visibility: visible; }
     #rx-print-area, #cert-print-area, #exam-print-area, #lab-print-area { display: block; position: absolute; top: 0; left: 0; width: 100%; }
     @page { margin: 10mm; }
-    /* Prescription prints at quarter-A4 (A6, 105mm x 148.5mm) — everything else stays full A4. */
-    @page rx-quarter { size: 105mm 148.5mm; margin: 4mm; }
-    #rx-print-area { page: rx-quarter; }
+    /* The prescription and lab request are both designed to fit within half of an A4 sheet (see
+       printStylesHalf and the dashed cut line at the bottom of each) — that's what actually
+       determines their size. This half-A4 page-size hint is a bonus for any browser/printer that
+       happens to honor it directly; Firefox in particular often ignores it and falls back to
+       whatever's picked in the print dialog (usually A4), which is exactly why the content itself
+       is sized to work either way. */
+    @page half-sheet { size: 210mm 148.5mm; margin: 4mm; }
+    #rx-print-area, #lab-print-area { page: half-sheet; }
   }
 `;
 
@@ -4757,24 +4766,29 @@ const printStyles = {
   checkLine: { breakInside: "avoid", padding: "2px 0" },
 };
 
-// Scaled-down version of printStyles, used only for the prescription — it prints at quarter-A4
-// (A6), so everything here is sized to actually fit that much smaller sheet legibly.
-const printStylesRx = {
-  page: { fontFamily: "Arial, Helvetica, sans-serif", color: "#111", padding: "3mm", maxWidth: "97mm" },
-  headerRow: { display: "flex", alignItems: "center", gap: 5, borderBottom: "1.5px solid #0F5E56", paddingBottom: 3, marginBottom: 4 },
-  logoCircle: { width: 20, height: 20, borderRadius: "50%", border: "1.2px solid #0F5E56", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  clinicName: { fontSize: 9.5, fontWeight: 800, color: "#0F5E56", letterSpacing: 0.1, lineHeight: 1.15 },
-  clinicSub: { fontSize: 6.5, color: "#333", lineHeight: 1.2 },
-  fieldsRow: { display: "flex", gap: 8, marginBottom: 5 },
-  fieldsCol: { flex: 1, display: "flex", flexDirection: "column", gap: 2 },
-  fieldLine: { fontSize: 7, borderBottom: "1px solid #999", paddingBottom: 1 },
-  rxMark: { fontSize: 15, fontWeight: 800, color: "#555", margin: "3px 0 5px" },
-  table: { width: "100%", borderCollapse: "collapse", fontSize: 6.8 },
-  th: { border: "1px solid #333", padding: "1.5px 2px", background: "#F1F4F3", textAlign: "left", fontSize: 6.3 },
-  td: { border: "1px solid #333", padding: "2px 2px", verticalAlign: "top" },
-  tdCenter: { border: "1px solid #333", padding: "2px 2px", textAlign: "center", verticalAlign: "top" },
-  footerRow: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: 10 },
-  followUp: { fontSize: 7 },
-  signatureBlock: { textAlign: "center", minWidth: 70 },
-  signatureLine: { borderTop: "1px solid #333", paddingTop: 2, fontSize: 7, fontWeight: 600 },
+// Compact print styles shared by the prescription and the lab/diagnostic request — sized to
+// comfortably fit within HALF of an A4 sheet (the top half, if a full sheet comes out of the
+// printer), since browsers don't reliably honor a custom small paper size in the print dialog
+// itself — Firefox in particular tends to fall back to whatever's selected there (usually A4)
+// regardless of what a stylesheet asks for. A visible dashed line marks where to cut.
+const printStylesHalf = {
+  page: { fontFamily: "Arial, Helvetica, sans-serif", color: "#111", padding: "5mm 6mm", maxWidth: "198mm", boxSizing: "border-box" },
+  headerRow: { display: "flex", alignItems: "center", gap: 8, borderBottom: "1.5px solid #0F5E56", paddingBottom: 5, marginBottom: 6 },
+  logoCircle: { width: 30, height: 30, borderRadius: "50%", border: "1.5px solid #0F5E56", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  clinicName: { fontSize: 13, fontWeight: 800, color: "#0F5E56", letterSpacing: 0.2, lineHeight: 1.15 },
+  clinicSub: { fontSize: 8.5, color: "#333", lineHeight: 1.2 },
+  fieldsRow: { display: "flex", gap: 14, marginBottom: 7 },
+  fieldsCol: { flex: 1, display: "flex", flexDirection: "column", gap: 3 },
+  fieldLine: { fontSize: 8.5, borderBottom: "1px solid #999", paddingBottom: 1 },
+  rxMark: { fontSize: 20, fontWeight: 800, color: "#555", margin: "4px 0 7px" },
+  table: { width: "100%", borderCollapse: "collapse", fontSize: 8.3 },
+  th: { border: "1px solid #333", padding: "2px 3px", background: "#F1F4F3", textAlign: "left", fontSize: 7.8 },
+  td: { border: "1px solid #333", padding: "3px 3px", verticalAlign: "top" },
+  tdCenter: { border: "1px solid #333", padding: "3px 3px", textAlign: "center", verticalAlign: "top" },
+  footerRow: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: 14 },
+  followUp: { fontSize: 8.5 },
+  signatureBlock: { textAlign: "center", minWidth: 100 },
+  signatureLine: { borderTop: "1px solid #333", paddingTop: 3, fontSize: 8.5, fontWeight: 600 },
+  certTitle: { textAlign: "center", fontSize: 12, fontWeight: 800, marginTop: 5, letterSpacing: 0.4 },
+  cutGuide: { borderTop: "1px dashed #999", marginTop: 8, paddingTop: 3, textAlign: "center", fontSize: 6.5, color: "#999" },
 };
