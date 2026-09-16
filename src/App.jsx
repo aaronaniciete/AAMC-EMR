@@ -2809,8 +2809,6 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
           <div style={{ fontSize: 7.5 }}>Medical Doctor</div>
         </div>
       </div>
-
-      <div style={printStylesHalf.cutGuide}>✂ cut here — top half of an A4 sheet</div>
     </div>
   );
 }
@@ -3838,8 +3836,6 @@ function PrintableLabRequest({ lab, patient, clinicInfo, provider }) {
           <div style={{ fontSize: 7.5 }}>License No. _____________</div>
         </div>
       </div>
-
-      <div style={printStylesHalf.cutGuide}>✂ cut here — top half of an A4 sheet</div>
     </div>
   );
 }
@@ -4790,5 +4786,4 @@ const printStylesHalf = {
   signatureBlock: { textAlign: "center", minWidth: 100 },
   signatureLine: { borderTop: "1px solid #333", paddingTop: 3, fontSize: 8.5, fontWeight: 600 },
   certTitle: { textAlign: "center", fontSize: 12, fontWeight: 800, marginTop: 5, letterSpacing: 0.4 },
-  cutGuide: { borderTop: "1px dashed #999", marginTop: 8, paddingTop: 3, textAlign: "center", fontSize: 6.5, color: "#999" },
 };
