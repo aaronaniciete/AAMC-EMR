@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   CalendarDays, Users, Stethoscope, Pill, Home, Search, Plus, X,
   Baby, UserRound, AlertTriangle, ChevronLeft, Clock, FileText,
-  ShieldAlert, LogOut, Trash2, Check, ClipboardList, Pencil, Layers, Lock, Inbox
+  ShieldAlert, LogOut, Trash2, Check, ClipboardList, Pencil, Layers, Lock, Inbox, Download
 } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
 
@@ -882,6 +882,37 @@ export default function ClinicEMR() {
     }
   }
 
+  // A full, standalone snapshot of everything in this clinic's database — every patient, every
+  // prescription, every chart note, plus the medication/template/settings reference data. This
+  // is meant to be saved somewhere OUTSIDE Supabase entirely (a laptop, Google Drive) so the
+  // clinic has its own independent copy, separate from whatever protections Supabase itself does
+  // or doesn't have on the current plan.
+  function exportFullBackup() {
+    const backup = {
+      backupType: "alba-aniciete-full-backup",
+      exportedAt: new Date().toISOString(),
+      clinicName: clinicInfo.name,
+      data,
+      commonMeds,
+      rxTemplates,
+      dosingRules,
+      labTemplates,
+      clinicInfo,
+      scheduleNotice,
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const safeName = clinicInfo.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "");
+    a.download = `${safeName}-full-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast("Full backup downloaded — save this file somewhere outside this app");
+  }
+
   const persistScheduleNotice = useCallback(async (next) => {
     setScheduleNotice(next);
     await saveScheduleNotice(next);
@@ -1088,6 +1119,7 @@ export default function ClinicEMR() {
               persistClinicInfo={persistClinicInfo}
               scheduleNotice={scheduleNotice}
               persistScheduleNotice={persistScheduleNotice}
+              onExportBackup={exportFullBackup}
             />
           )}
         </div>
@@ -4366,7 +4398,7 @@ function RxTemplatesPage({ rxTemplates, persistRxTemplates, commonMeds, dosingRu
 }
 
 /* ---------------- Staff directory (read-only list; logins are managed in Supabase) ---------------- */
-function StaffDirectory({ staffList, showToast, clinicInfo, persistClinicInfo, scheduleNotice, persistScheduleNotice }) {
+function StaffDirectory({ staffList, showToast, clinicInfo, persistClinicInfo, scheduleNotice, persistScheduleNotice, onExportBackup }) {
   const [editingClinic, setEditingClinic] = useState(false);
   const [clinicName, setClinicName] = useState(clinicInfo.name);
   const [clinicAddress, setClinicAddress] = useState(clinicInfo.address);
@@ -4482,6 +4514,20 @@ function StaffDirectory({ staffList, showToast, clinicInfo, persistClinicInfo, s
         ) : (
           <EmptyState text="No notice showing on the booking page right now." />
         )}
+      </SectionCard>
+
+      <SectionCard title="Data backup">
+        <div style={{ fontSize: 12.5, color: "#5B6B68", marginBottom: 12, lineHeight: 1.6 }}>
+          Downloads everything in this clinic's records right now — every patient, chart note,
+          treatment plan, prescription, certificate, exam, and lab request, plus your medications
+          and settings — as one file. This is separate from anything Supabase does on its own, so
+          save it somewhere outside this app entirely: your own computer, a personal Google Drive,
+          wherever you'd actually be able to find it if something ever went wrong here. Doing this
+          weekly is a reasonable habit at this clinic's size.
+        </div>
+        <button style={{ ...styles.primaryBtn, justifyContent: "center" }} onClick={onExportBackup}>
+          <Download size={15} /> Download full backup
+        </button>
       </SectionCard>
 
       <SectionCard title="Directory">
