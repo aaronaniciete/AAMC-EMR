@@ -751,6 +751,7 @@ function backfillRowIndications(rows, medsByName) {
 export default function ClinicEMR() {
   const [authLoading, setAuthLoading] = useState(true);
   const [session, setSession] = useState(null);
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
   const [myProfile, setMyProfile] = useState(null);
   const [dataLoading, setDataLoading] = useState(false);
   const [data, setData] = useState(emptyData());
@@ -773,7 +774,13 @@ export default function ClinicEMR() {
       setSession(session);
       setAuthLoading(false);
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      setSession(s);
+      // Fires when someone arrives via a "set up your password" or "forgot password" email
+      // link — Supabase gives them a working session at this point, but the right next step is
+      // to have them actually choose a password, not drop them straight into the dashboard.
+      if (event === "PASSWORD_RECOVERY") setPasswordRecovery(true);
+    });
     return () => sub.subscription.unsubscribe();
   }, []);
 
@@ -1024,6 +1031,10 @@ export default function ClinicEMR() {
 
   if (!session) return <SignIn />;
 
+  if (passwordRecovery) {
+    return <SetNewPassword onDone={() => setPasswordRecovery(false)} />;
+  }
+
   if (dataLoading) {
     return (
       <div style={styles.centerScreen}>
@@ -1163,18 +1174,90 @@ export default function ClinicEMR() {
 
 /* ---------------- Sign in (real Supabase Auth) ---------------- */
 function SignIn() {
+  const [mode, setMode] = useState("signin"); // "signin" | "setup" | "forgot"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [linkSent, setLinkSent] = useState(false);
 
-  async function handleSubmit() {
+  async function handleSignIn() {
     setErrorMsg("");
     if (!email.trim() || !password) return;
     setSubmitting(true);
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     setSubmitting(false);
     if (error) setErrorMsg(error.message);
+  }
+
+  // Sends the same kind of email either way — Supabase doesn't distinguish "set my first
+  // password" from "I forgot it," they're both just "email me a secure link to set a password."
+  // Only the on-screen wording differs, based on which link someone clicked to get here.
+  async function handleSendLink() {
+    setErrorMsg("");
+    if (!email.trim()) { setErrorMsg("Enter your email first."); return; }
+    setSubmitting(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: window.location.origin,
+    });
+    setSubmitting(false);
+    if (error) setErrorMsg(error.message);
+    else setLinkSent(true);
+  }
+
+  function backToSignIn() {
+    setMode("signin");
+    setErrorMsg("");
+    setLinkSent(false);
+  }
+
+  if (mode === "setup" || mode === "forgot") {
+    return (
+      <div style={styles.centerScreen}>
+        <style>{globalCss}</style>
+        <div style={styles.signInCard}>
+          <img src="/logo-full.png" alt="Alba-Aniciete Medical Clinic" style={{ width: 180, display: "block", margin: "0 auto 14px" }} />
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#12312D", textAlign: "center", marginBottom: 6 }}>
+            {mode === "setup" ? "Set up your password" : "Reset your password"}
+          </div>
+          {linkSent ? (
+            <p style={{ color: "#0F5E56", fontSize: 13.5, textAlign: "center", marginTop: 12 }}>
+              Check <b>{email.trim()}</b> for a link — it'll bring you back here to choose a
+              password.
+            </p>
+          ) : (
+            <>
+              <p style={{ color: "#5B6B68", fontSize: 13.5, marginTop: 2, marginBottom: 18, textAlign: "center" }}>
+                {mode === "setup"
+                  ? "Your clinic admin has already created your login — enter the same email they used, and we'll send you a link to choose your own password."
+                  : "Enter your email and we'll send you a link to choose a new password."}
+              </p>
+              <div style={styles.label}>Email</div>
+              <input
+                style={styles.input}
+                type="email"
+                autoComplete="username"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSendLink()}
+                autoFocus
+              />
+              {errorMsg && <div style={{ color: "#B23B3B", fontSize: 12.5, marginTop: 10 }}>{errorMsg}</div>}
+              <button
+                style={{ ...styles.primaryBtn, marginTop: 14, width: "100%", justifyContent: "center" }}
+                onClick={handleSendLink}
+                disabled={submitting}
+              >
+                {submitting ? "Sending…" : "Send me a link"}
+              </button>
+            </>
+          )}
+          <button onClick={backToSignIn} style={{ ...styles.linkBtn, marginTop: 16, width: "100%", justifyContent: "center" }}>
+            ← Back to sign in
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -1193,7 +1276,7 @@ function SignIn() {
           autoComplete="username"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+          onKeyDown={(e) => e.key === "Enter" && handleSignIn()}
         />
         <div style={{ ...styles.label, marginTop: 10 }}>Password</div>
         <input
@@ -1202,19 +1285,89 @@ function SignIn() {
           autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+          onKeyDown={(e) => e.key === "Enter" && handleSignIn()}
         />
         {errorMsg && <div style={{ color: "#B23B3B", fontSize: 12.5, marginTop: 10 }}>{errorMsg}</div>}
         <button
           style={{ ...styles.primaryBtn, marginTop: 14, width: "100%", justifyContent: "center" }}
-          onClick={handleSubmit}
+          onClick={handleSignIn}
           disabled={submitting}
         >
           {submitting ? "Signing in…" : "Sign in"}
         </button>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 14 }}>
+          <button onClick={() => { setMode("setup"); setErrorMsg(""); }} style={{ ...styles.linkBtn, fontSize: 12 }}>
+            First time here?
+          </button>
+          <button onClick={() => { setMode("forgot"); setErrorMsg(""); }} style={{ ...styles.linkBtn, fontSize: 12 }}>
+            Forgot password?
+          </button>
+        </div>
         <p style={{ color: "#8A9793", fontSize: 11.5, marginTop: 14 }}>
-          Don't have a login yet? Ask your clinic admin to create one in the Supabase dashboard.
+          No login yet at all? Ask your clinic admin to create one in the Supabase dashboard —
+          then use "First time here?" above to set your own password.
         </p>
+      </div>
+    </div>
+  );
+}
+
+// Shown when someone arrives via the emailed "set up" or "reset" link — Supabase has already
+// given them a working session at this point, all that's left is to actually choose a password.
+function SetNewPassword({ onDone }) {
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setErrorMsg("");
+    if (password.length < 6) { setErrorMsg("Password must be at least 6 characters."); return; }
+    if (password !== confirmPassword) { setErrorMsg("Passwords don't match."); return; }
+    setSaving(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    setSaving(false);
+    if (error) setErrorMsg(error.message);
+    else onDone();
+  }
+
+  return (
+    <div style={styles.centerScreen}>
+      <style>{globalCss}</style>
+      <div style={styles.signInCard}>
+        <img src="/logo-full.png" alt="Alba-Aniciete Medical Clinic" style={{ width: 180, display: "block", margin: "0 auto 14px" }} />
+        <div style={{ fontSize: 15, fontWeight: 700, color: "#12312D", textAlign: "center", marginBottom: 6 }}>
+          Choose your password
+        </div>
+        <p style={{ color: "#5B6B68", fontSize: 13.5, marginTop: 2, marginBottom: 18, textAlign: "center" }}>
+          This is what you'll sign in with from now on.
+        </p>
+        <div style={styles.label}>New password</div>
+        <input
+          style={styles.input}
+          type="password"
+          autoComplete="new-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoFocus
+        />
+        <div style={{ ...styles.label, marginTop: 10 }}>Confirm password</div>
+        <input
+          style={styles.input}
+          type="password"
+          autoComplete="new-password"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && save()}
+        />
+        {errorMsg && <div style={{ color: "#B23B3B", fontSize: 12.5, marginTop: 10 }}>{errorMsg}</div>}
+        <button
+          style={{ ...styles.primaryBtn, marginTop: 14, width: "100%", justifyContent: "center" }}
+          onClick={save}
+          disabled={saving}
+        >
+          {saving ? "Saving…" : "Save password and continue"}
+        </button>
       </div>
     </div>
   );
