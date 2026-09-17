@@ -3041,13 +3041,13 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
       </div>
 
       <div style={printStylesRxA6.fieldsCol}>
-        <div style={printStylesRxA6.fieldLine}><b>Name:</b> {patient.name}</div>
-        <div style={printStylesRxA6.fieldLine}><b>Address:</b> {patient.address || ""}</div>
-        <div style={printStylesRxA6.fieldLine}><b>Contact No:</b> {patient.contact || ""}</div>
-        <div style={printStylesRxA6.fieldLine}><b>Date:</b> {fmtDate(today)}</div>
-        <div style={printStylesRxA6.fieldLine}><b>Age/Sex:</b> {age !== null ? age : "—"} / {(patient.sex || "").slice(0, 1)}</div>
         <div style={printStylesRxA6.fieldLine}>
-          <b>BP:</b> {v.bp || "____"} · <b>Temp:</b> {v.temp || "___"} · <b>Wt:</b> {v.weight || "___"}
+          <b>Name:</b> {patient.name} &nbsp;&nbsp; <b>Age/Sex:</b> {age !== null ? age : "—"} / {(patient.sex || "").slice(0, 1)}
+        </div>
+        <div style={printStylesRxA6.fieldLine}><b>Address:</b> {patient.address || ""}</div>
+        <div style={printStylesRxA6.fieldLine}><b>Date:</b> {fmtDate(today)}</div>
+        <div style={printStylesRxA6.fieldLine}>
+          <b>Wt:</b> {v.weight || "___"}
         </div>
       </div>
 
