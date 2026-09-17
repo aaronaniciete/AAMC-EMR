@@ -3026,7 +3026,7 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
     <div style={printStylesHalf.page}>
       <div style={printStylesHalf.headerRow}>
         <div style={printStylesHalf.logoCircle}>
-          <Stethoscope size={16} color="#0F5E56" />
+          <Stethoscope size={28} color="#0F5E56" />
         </div>
         <div>
           <div style={printStylesHalf.clinicName}>{clinicInfo.name}</div>
@@ -3055,12 +3055,12 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
       <table style={printStylesHalf.table}>
         <thead>
           <tr>
-            <th style={{ ...printStylesHalf.th, width: 14 }}>No</th>
+            <th style={{ ...printStylesHalf.th, width: 28 }}>No</th>
             <th style={printStylesHalf.th}>Medications and Dosage</th>
-            <th style={{ ...printStylesHalf.th, width: 14 }}>AM</th>
-            <th style={{ ...printStylesHalf.th, width: 14 }}>NN</th>
-            <th style={{ ...printStylesHalf.th, width: 14 }}>PM</th>
-            <th style={{ ...printStylesHalf.th, width: 55 }}>Remarks</th>
+            <th style={{ ...printStylesHalf.th, width: 28 }}>AM</th>
+            <th style={{ ...printStylesHalf.th, width: 28 }}>NN</th>
+            <th style={{ ...printStylesHalf.th, width: 28 }}>PM</th>
+            <th style={{ ...printStylesHalf.th, width: 110 }}>Remarks</th>
           </tr>
         </thead>
         <tbody>
@@ -3069,7 +3069,7 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
               <td style={printStylesHalf.tdCenter}>{m.qty || ""}</td>
               <td style={printStylesHalf.td}>
                 {m.name}
-                {m.indication && <div style={{ fontSize: 7, marginTop: 1 }}>({m.indication})</div>}
+                {m.indication && <div style={{ fontSize: 14, marginTop: 2 }}>({m.indication})</div>}
               </td>
               <td style={printStylesHalf.tdCenter}>{m.am || ""}</td>
               <td style={printStylesHalf.tdCenter}>{m.nn || ""}</td>
@@ -3081,7 +3081,7 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
       </table>
 
       {rx.notes && (
-        <div style={{ fontSize: 8, marginTop: 5 }}>
+        <div style={{ fontSize: 16, marginTop: 10 }}>
           <b>Notes:</b> {rx.notes}
         </div>
       )}
@@ -3090,11 +3090,11 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
         <div style={printStylesHalf.followUp}>Follow-up: ________, {today.getFullYear()}</div>
         <div style={printStylesHalf.signatureBlock}>
           <div style={printStylesHalf.signatureLine}>{provider}</div>
-          <div style={{ fontSize: 7.5 }}>Medical Doctor</div>
+          <div style={{ fontSize: 14 }}>Medical Doctor</div>
         </div>
       </div>
       {rx.signedBy && (
-        <div style={{ fontSize: 6.5, color: "#0F5E56", marginTop: 4, textAlign: "right" }}>
+        <div style={{ fontSize: 13, color: "#0F5E56", marginTop: 8, textAlign: "right" }}>
           Electronically signed by {rx.signedBy} — {fmtDateTime(rx.signedAt)}
         </div>
       )}
@@ -3754,7 +3754,7 @@ function PrintableMedCert({ cert, patient, clinicInfo, provider }) {
     <div style={printStylesHalf.page}>
       <div style={printStylesHalf.headerRow}>
         <div style={printStylesHalf.logoCircle}>
-          <Stethoscope size={16} color="#0F5E56" />
+          <Stethoscope size={28} color="#0F5E56" />
         </div>
         <div>
           <div style={printStylesHalf.clinicName}>{clinicInfo.name}</div>
@@ -3763,52 +3763,52 @@ function PrintableMedCert({ cert, patient, clinicInfo, provider }) {
         </div>
       </div>
 
-      <div style={{ textAlign: "right", fontSize: 8.5, margin: "4px 0 6px" }}>
-        <b>Date:</b> <Blank minWidth={90}>{fmtDate(issueDate)}</Blank>
+      <div style={{ textAlign: "right", fontSize: 16, margin: "8px 0 12px" }}>
+        <b>Date:</b> <Blank minWidth={170}>{fmtDate(issueDate)}</Blank>
       </div>
 
       <div style={printStylesHalf.certTitle}>MEDICAL CERTIFICATE</div>
 
-      <div style={{ fontSize: 8.5, marginTop: 6, lineHeight: 1.5 }}>
-        <p style={{ margin: "0 0 3px" }}>To whom it may concern:</p>
+      <div style={{ fontSize: 16, marginTop: 12, lineHeight: 1.6 }}>
+        <p style={{ margin: "0 0 6px" }}>To whom it may concern:</p>
         <p style={{ textIndent: "1.5em", margin: 0 }}>
-          This is to certify that <Blank minWidth={140}>{patient.name}</Blank>,{" "}
-          <Blank minWidth={26}>{age !== null ? age : ""}</Blank> years of age,{" "}
-          <Blank minWidth={40}>{patient.sex || ""}</Blank> (sex), currently residing in{" "}
-          <Blank minWidth={160}>{patient.address || ""}</Blank> consulted and was examined on{" "}
-          <Blank minWidth={80}>{fmtDate(cert.examDate)}</Blank> at {clinicInfo.name} for{" "}
-          <Blank minWidth={160}>{cert.reason || ""}</Blank>.
+          This is to certify that <Blank minWidth={260}>{patient.name}</Blank>,{" "}
+          <Blank minWidth={48}>{age !== null ? age : ""}</Blank> years of age,{" "}
+          <Blank minWidth={75}>{patient.sex || ""}</Blank> (sex), currently residing in{" "}
+          <Blank minWidth={300}>{patient.address || ""}</Blank> consulted and was examined on{" "}
+          <Blank minWidth={150}>{fmtDate(cert.examDate)}</Blank> at {clinicInfo.name} for{" "}
+          <Blank minWidth={300}>{cert.reason || ""}</Blank>.
         </p>
       </div>
 
-      <div style={{ marginTop: 6 }}>
-        <div style={{ fontSize: 8.5, fontWeight: 700 }}>Assessment/Impression:</div>
+      <div style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 16, fontWeight: 700 }}>Assessment/Impression:</div>
         <div style={printStylesHalf.ruledBlock}>{cert.assessment || ""}</div>
       </div>
 
-      <div style={{ marginTop: 6 }}>
-        <div style={{ fontSize: 8.5, fontWeight: 700 }}>Recommendation/s:</div>
+      <div style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 16, fontWeight: 700 }}>Recommendation/s:</div>
         <div style={printStylesHalf.ruledBlock}>{cert.recommendation || ""}</div>
       </div>
 
-      <p style={{ fontSize: 7.5, marginTop: 7, lineHeight: 1.4 }}>
+      <p style={{ fontSize: 14, marginTop: 14, lineHeight: 1.4 }}>
         This certificate is being issued upon the request of the above-mentioned name for whatever
         purpose it may serve, excluding legal matters.
       </p>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 24 }}>
         <div style={printStylesHalf.signatureBlock}>
           <div style={printStylesHalf.signatureLine}>{provider}</div>
-          <div style={{ fontSize: 7.5 }}>Medical Doctor</div>
+          <div style={{ fontSize: 14 }}>Medical Doctor</div>
         </div>
       </div>
       {cert.signedBy && (
-        <div style={{ fontSize: 6.5, color: "#0F5E56", marginTop: 3, textAlign: "right" }}>
+        <div style={{ fontSize: 13, color: "#0F5E56", marginTop: 6, textAlign: "right" }}>
           Electronically signed by {cert.signedBy} — {fmtDateTime(cert.signedAt)}
         </div>
       )}
 
-      <div style={{ fontSize: 7.5, fontWeight: 700, marginTop: 8 }}>*Not valid without dry seal</div>
+      <div style={{ fontSize: 14, fontWeight: 700, marginTop: 16 }}>*Not valid without dry seal</div>
     </div>
   );
 }
@@ -4127,7 +4127,7 @@ function PrintableLabRequest({ lab, patient, clinicInfo, provider }) {
     <div style={printStylesHalf.page}>
       <div style={printStylesHalf.headerRow}>
         <div style={printStylesHalf.logoCircle}>
-          <Stethoscope size={16} color="#0F5E56" />
+          <Stethoscope size={28} color="#0F5E56" />
         </div>
         <div>
           <div style={printStylesHalf.clinicName}>{clinicInfo.name}</div>
@@ -4136,38 +4136,38 @@ function PrintableLabRequest({ lab, patient, clinicInfo, provider }) {
         </div>
       </div>
 
-      <div style={{ ...printStylesHalf.certTitle, letterSpacing: 1 }}>LABORATORY AND DIAGNOSTIC REQUEST</div>
+      <div style={{ ...printStylesHalf.certTitle, letterSpacing: 1.2 }}>LABORATORY AND DIAGNOSTIC REQUEST</div>
 
-      <div style={{ fontSize: 8.5, marginTop: 8 }}>
-        Name: <Blank minWidth={200}>{patient.name}</Blank> &nbsp;&nbsp; Date: <Blank minWidth={70}>{fmtDate(issueDate)}</Blank>
+      <div style={{ fontSize: 16, marginTop: 15 }}>
+        Name: <Blank minWidth={370}>{patient.name}</Blank> &nbsp;&nbsp; Date: <Blank minWidth={130}>{fmtDate(issueDate)}</Blank>
       </div>
-      <div style={{ fontSize: 8.5, marginTop: 5 }}>
-        Address: <Blank minWidth={200}>{patient.address || ""}</Blank> &nbsp;&nbsp; Age/Sex: <Blank minWidth={55}>{age !== null ? `${age}` : ""}{age !== null && patient.sex ? " / " : ""}{(patient.sex || "").slice(0, 1)}</Blank>
+      <div style={{ fontSize: 16, marginTop: 9 }}>
+        Address: <Blank minWidth={370}>{patient.address || ""}</Blank> &nbsp;&nbsp; Age/Sex: <Blank minWidth={100}>{age !== null ? `${age}` : ""}{age !== null && patient.sex ? " / " : ""}{(patient.sex || "").slice(0, 1)}</Blank>
       </div>
 
-      <div style={{ display: "flex", gap: 18, marginTop: 8 }}>
+      <div style={{ display: "flex", gap: 34, marginTop: 15 }}>
         {[colA, colB].map((col, ci) => (
-          <div key={ci} style={{ flex: 1, fontSize: 8, lineHeight: 1.5 }}>
+          <div key={ci} style={{ flex: 1, fontSize: 15, lineHeight: 1.55 }}>
             {col.map((t) => (
               <div key={t}>{checkedSet.has(t) ? "☑" : "☐"} {t}</div>
             ))}
             {ci === 1 && LAB_TEST_WITH_DETAIL.map((label) => (
               <div key={label}>
-                {detailChecked(detailMap, label) ? "☑" : "☐"} {label}: <Blank minWidth={65}>{detailMap[label] || ""}</Blank>
+                {detailChecked(detailMap, label) ? "☑" : "☐"} {label}: <Blank minWidth={120}>{detailMap[label] || ""}</Blank>
               </div>
             ))}
           </div>
         ))}
       </div>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 24 }}>
         <div style={printStylesHalf.signatureBlock}>
           <div style={printStylesHalf.signatureLine}>{provider}, MD</div>
-          <div style={{ fontSize: 7.5 }}>License No. _____________</div>
+          <div style={{ fontSize: 14 }}>License No. _____________</div>
         </div>
       </div>
       {lab.signedBy && (
-        <div style={{ fontSize: 6.5, color: "#0F5E56", marginTop: 4, textAlign: "right" }}>
+        <div style={{ fontSize: 13, color: "#0F5E56", marginTop: 8, textAlign: "right" }}>
           Electronically signed by {lab.signedBy} — {fmtDateTime(lab.signedAt)}
         </div>
       )}
@@ -5172,23 +5172,23 @@ const printStyles = {
 // itself — Firefox in particular tends to fall back to whatever's selected there (usually A4)
 // regardless of what a stylesheet asks for. A visible dashed line marks where to cut.
 const printStylesHalf = {
-  page: { fontFamily: "Arial, Helvetica, sans-serif", color: "#111", padding: "5mm 6mm", maxWidth: "198mm", boxSizing: "border-box" },
-  headerRow: { display: "flex", alignItems: "center", gap: 8, borderBottom: "1.5px solid #0F5E56", paddingBottom: 5, marginBottom: 6 },
-  logoCircle: { width: 30, height: 30, borderRadius: "50%", border: "1.5px solid #0F5E56", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  clinicName: { fontSize: 13, fontWeight: 800, color: "#0F5E56", letterSpacing: 0.2, lineHeight: 1.15 },
-  clinicSub: { fontSize: 8.5, color: "#333", lineHeight: 1.2 },
-  fieldsRow: { display: "flex", gap: 14, marginBottom: 7 },
-  fieldsCol: { flex: 1, display: "flex", flexDirection: "column", gap: 3 },
-  fieldLine: { fontSize: 8.5, borderBottom: "1px solid #999", paddingBottom: 1 },
-  rxMark: { fontSize: 20, fontWeight: 800, color: "#555", margin: "4px 0 7px" },
-  table: { width: "100%", borderCollapse: "collapse", fontSize: 8.3 },
-  th: { border: "1px solid #333", padding: "2px 3px", background: "#F1F4F3", textAlign: "left", fontSize: 7.8 },
-  td: { border: "1px solid #333", padding: "3px 3px", verticalAlign: "top" },
-  tdCenter: { border: "1px solid #333", padding: "3px 3px", textAlign: "center", verticalAlign: "top" },
-  footerRow: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: 14 },
-  followUp: { fontSize: 8.5 },
-  signatureBlock: { textAlign: "center", minWidth: 100 },
-  signatureLine: { borderTop: "1px solid #333", paddingTop: 3, fontSize: 8.5, fontWeight: 600 },
-  certTitle: { textAlign: "center", fontSize: 12, fontWeight: 800, marginTop: 5, letterSpacing: 0.4 },
-  ruledBlock: { fontSize: 8.5, lineHeight: 1.7, borderBottom: "1px solid #999", minHeight: 26, marginTop: 2, whiteSpace: "pre-wrap" },
+  page: { fontFamily: "Arial, Helvetica, sans-serif", color: "#111", padding: "9mm 11mm", maxWidth: "198mm", boxSizing: "border-box" },
+  headerRow: { display: "flex", alignItems: "center", gap: 15, borderBottom: "2.5px solid #0F5E56", paddingBottom: 9, marginBottom: 11 },
+  logoCircle: { width: 54, height: 54, borderRadius: "50%", border: "2.5px solid #0F5E56", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  clinicName: { fontSize: 25, fontWeight: 800, color: "#0F5E56", letterSpacing: 0.3, lineHeight: 1.15 },
+  clinicSub: { fontSize: 16, color: "#333", lineHeight: 1.25 },
+  fieldsRow: { display: "flex", gap: 26, marginBottom: 13 },
+  fieldsCol: { flex: 1, display: "flex", flexDirection: "column", gap: 6 },
+  fieldLine: { fontSize: 16, borderBottom: "1.5px solid #999", paddingBottom: 2 },
+  rxMark: { fontSize: 38, fontWeight: 800, color: "#555", margin: "7px 0 13px" },
+  table: { width: "100%", borderCollapse: "collapse", fontSize: 16 },
+  th: { border: "1.5px solid #333", padding: "5px 6px", background: "#F1F4F3", textAlign: "left", fontSize: 15 },
+  td: { border: "1.5px solid #333", padding: "6px 6px", verticalAlign: "top" },
+  tdCenter: { border: "1.5px solid #333", padding: "6px 6px", textAlign: "center", verticalAlign: "top" },
+  footerRow: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: 26 },
+  followUp: { fontSize: 16 },
+  signatureBlock: { textAlign: "center", minWidth: 190 },
+  signatureLine: { borderTop: "1.5px solid #333", paddingTop: 6, fontSize: 16, fontWeight: 600 },
+  certTitle: { textAlign: "center", fontSize: 23, fontWeight: 800, marginTop: 9, letterSpacing: 0.6 },
+  ruledBlock: { fontSize: 16, lineHeight: 1.7, borderBottom: "1.5px solid #999", minHeight: 50, marginTop: 4, whiteSpace: "pre-wrap" },
 };
