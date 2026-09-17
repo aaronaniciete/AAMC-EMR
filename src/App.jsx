@@ -3063,7 +3063,7 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
             <th style={{ ...th, width: 20 }}>AM</th>
             <th style={{ ...th, width: 20 }}>NN</th>
             <th style={{ ...th, width: 20 }}>PM</th>
-            <th style={{ ...th, width: 44 }}>Remarks</th>
+            <th style={{ ...th, width: 88 }}>Remarks</th>
           </tr>
         </thead>
         <tbody>
