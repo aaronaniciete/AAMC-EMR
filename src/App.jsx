@@ -3042,10 +3042,9 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
 
       <div style={printStylesRxA6.fieldsCol}>
         <div style={printStylesRxA6.fieldLine}>
-          <b>Name:</b> {patient.name} &nbsp;&nbsp; <b>Age/Sex:</b> {age !== null ? age : "—"} / {(patient.sex || "").slice(0, 1)}
+          <b>Name:</b> {patient.name} &nbsp;&nbsp; <b>Age/Sex:</b> {age !== null ? age : "—"} / {(patient.sex || "").slice(0, 1)} &nbsp;&nbsp; <b>Date:</b> {fmtDate(today)}
         </div>
         <div style={printStylesRxA6.fieldLine}><b>Address:</b> {patient.address || ""}</div>
-        <div style={printStylesRxA6.fieldLine}><b>Date:</b> {fmtDate(today)}</div>
         <div style={printStylesRxA6.fieldLine}>
           <b>Wt:</b> {v.weight || "___"}
         </div>
