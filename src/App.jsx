@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   CalendarDays, Users, Stethoscope, Pill, Home, Search, Plus, X,
   Baby, UserRound, AlertTriangle, ChevronLeft, Clock, FileText,
-  ShieldAlert, LogOut, Trash2, Check, ClipboardList, Pencil, Layers, Lock, Inbox, Download
+  LogOut, Trash2, Check, ClipboardList, Pencil, Layers, Lock, Inbox, Download
 } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
 
@@ -1069,7 +1069,6 @@ export default function ClinicEMR() {
         <TopBar currentUser={currentUser} />
         <PulseDivider />
         <div style={styles.content}>
-          <PrivacyBanner />
           {view === "dashboard" && (
             <Dashboard
               data={data}
@@ -1415,26 +1414,6 @@ function CompleteProfile({ onSave }) {
     </div>
   );
 }
-/* ---------------- Privacy banner ---------------- */
-function PrivacyBanner() {
-  const [open, setOpen] = useState(true);
-  if (!open) return null;
-  return (
-    <div style={styles.banner}>
-      <ShieldAlert size={18} color="#8A4B12" style={{ flexShrink: 0, marginTop: 1 }} />
-      <div style={{ fontSize: 12.5, color: "#6B4A1F", lineHeight: 1.5 }}>
-        <strong>Before trusting this with real patients:</strong> this build now has real login and a real
-        database, but no one has audited it for healthcare data compliance (e.g. the Philippines Data
-        Privacy Act) — access logs, backup policy, and a legal/compliance review are still worth doing.
-        Test thoroughly with fake data first.
-      </div>
-      <button onClick={() => setOpen(false)} style={styles.bannerClose} aria-label="Dismiss">
-        <X size={14} />
-      </button>
-    </div>
-  );
-}
-
 /* ---------------- Sidebar ---------------- */
 function Sidebar({ view, setView, currentUser, onSignOut, showToast, pendingCount, onSetPin }) {
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -5095,8 +5074,6 @@ const styles = {
   primaryBtn: { display: "inline-flex", alignItems: "center", gap: 6, background: "#0F5E56", color: "#fff", border: "none", borderRadius: 8, padding: "9px 14px", fontSize: 13.5, fontWeight: 600, cursor: "pointer" },
   staffPickBtn: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 11px", borderRadius: 8, border: "1px solid #DCE3E1", background: "#FBFCFB", cursor: "pointer", fontSize: 13.5, color: "#12312D" },
   roleTag: { fontSize: 11, color: "#0F5E56", background: "#EAF3F1", padding: "2px 8px", borderRadius: 20 },
-  banner: { display: "flex", gap: 10, alignItems: "flex-start", background: "#FBF1DF", border: "1px solid #EAD6A8", borderRadius: 10, padding: "10px 12px", margin: "18px 0" },
-  bannerClose: { background: "none", border: "none", cursor: "pointer", color: "#8A4B12", padding: 2 },
   navBtn: { display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", color: "#B9CBC8", padding: "9px 10px", borderRadius: 8, fontSize: 13.5, cursor: "pointer", textAlign: "left" },
   navBtnActive: { background: "rgba(255,255,255,0.08)", color: "#fff" },
   navBadge: { background: "#C97A2B", color: "#fff", fontSize: 10.5, fontWeight: 700, borderRadius: 10, padding: "1px 6px", flexShrink: 0 },
