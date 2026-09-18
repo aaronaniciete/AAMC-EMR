@@ -5208,11 +5208,11 @@ const printStylesRxA6 = {
 // stopping at a floor that's tight but still meant to be legible, not a font size that just
 // happens to fit.
 function getRxDensityTier(medCount) {
-  if (medCount <= 2) return { rxMark: 26, tableFont: 11.5, medNameFont: 14, thFont: 10, cellPad: "6px 4px", indicationFont: 9 };
-  if (medCount <= 3) return { rxMark: 22, tableFont: 10, medNameFont: 12.5, thFont: 9, cellPad: "4.5px 3.5px", indicationFont: 8 };
-  if (medCount <= 4) return { rxMark: 19, tableFont: 9, medNameFont: 11.3, thFont: 8, cellPad: "3.5px 3px", indicationFont: 7.3 };
-  if (medCount <= 6) return { rxMark: 16, tableFont: 8, medNameFont: 10, thFont: 7.3, cellPad: "2.5px 2.5px", indicationFont: 6.7 };
-  return { rxMark: 14, tableFont: 7.2, medNameFont: 9, thFont: 6.6, cellPad: "1.8px 2px", indicationFont: 6.2 };
+  if (medCount <= 2) return { rxMark: 26, tableFont: 11.5, medNameFont: 17, thFont: 10, cellPad: "6px 4px", indicationFont: 9 };
+  if (medCount <= 3) return { rxMark: 22, tableFont: 10, medNameFont: 15, thFont: 9, cellPad: "4.5px 3.5px", indicationFont: 8 };
+  if (medCount <= 4) return { rxMark: 19, tableFont: 9, medNameFont: 13.5, thFont: 8, cellPad: "3.5px 3px", indicationFont: 7.3 };
+  if (medCount <= 6) return { rxMark: 16, tableFont: 8, medNameFont: 12, thFont: 7.3, cellPad: "2.5px 2.5px", indicationFont: 6.7 };
+  return { rxMark: 14, tableFont: 7.2, medNameFont: 11, thFont: 6.6, cellPad: "1.8px 2px", indicationFont: 6.2 };
 }
 
 const printStylesHalf = {
