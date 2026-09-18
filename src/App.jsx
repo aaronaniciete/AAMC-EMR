@@ -3762,23 +3762,24 @@ function PrintableMedCert({ cert, patient, clinicInfo, provider }) {
         <div style={printStylesHalf.logoCircle}>
           <Stethoscope size={28} color="#0F5E56" />
         </div>
-        <div style={{ flex: 1, textAlign: "center", minWidth: 0 }}>
-          <div style={{ fontSize: 17, fontWeight: 800, color: "#0F5E56", letterSpacing: 0.2, lineHeight: 1.15 }}>{clinicInfo.name}</div>
-          <div style={{ fontSize: 13, color: "#333", lineHeight: 1.25 }}>{clinicInfo.address}</div>
-          <div style={{ fontSize: 13, color: "#333", lineHeight: 1.25 }}>{clinicInfo.phone}</div>
+        <div style={{ flex: 1, textAlign: "center", minWidth: 0, padding: "0 4px" }}>
+          <div style={{ fontSize: 17, fontWeight: 700, color: "#0F5E56" }}>{clinicInfo.name}</div>
+          <div style={{ fontSize: 12, color: "#333", marginTop: 2, lineHeight: 1.3 }}>
+            {clinicInfo.address} &nbsp;·&nbsp; {clinicInfo.phone}
+          </div>
         </div>
         <div style={{ width: 54, flexShrink: 0 }} />
       </div>
 
-      <div style={{ textAlign: "right", fontSize: 15, margin: "8px 0 12px" }}>
+      <div style={{ textAlign: "right", fontSize: 18, margin: "8px 0 12px" }}>
         <b>Date:</b> <Blank minWidth={130}>{fmtDate(issueDate)}</Blank>
       </div>
 
-      <div style={{ ...printStylesHalf.certTitle, fontSize: 17 }}>MEDICAL CERTIFICATE</div>
+      <div style={{ ...printStylesHalf.certTitle, fontSize: 18 }}>MEDICAL CERTIFICATE</div>
 
-      <div style={{ fontSize: 22, marginTop: 14, lineHeight: 1.5 }}>
-        <p style={{ margin: "0 0 8px" }}>To whom it may concern:</p>
-        <p style={{ textIndent: "1.4em", margin: 0 }}>
+      <div style={{ fontSize: 24, marginTop: 14, lineHeight: 1.4 }}>
+        <p style={{ margin: "0 0 6px" }}>To whom it may concern:</p>
+        <p style={{ textIndent: "1.3em", margin: 0 }}>
           This is to certify that <Blank minWidth={180}>{patient.name}</Blank>,{" "}
           <Blank minWidth={35}>{age !== null ? age : ""}</Blank> years of age,{" "}
           <Blank minWidth={50}>{patient.sex || ""}</Blank> (sex), residing in{" "}
@@ -3788,35 +3789,35 @@ function PrintableMedCert({ cert, patient, clinicInfo, provider }) {
         </p>
       </div>
 
-      <div style={{ marginTop: 14 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "#5B6B68" }}>Assessment/Impression:</div>
+      <div style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 19, fontWeight: 700, color: "#5B6B68" }}>Assessment/Impression:</div>
         <div style={printStylesHalf.ruledBlock}>{cert.assessment || ""}</div>
       </div>
 
-      <div style={{ marginTop: 14 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "#5B6B68" }}>Recommendation/s:</div>
+      <div style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 19, fontWeight: 700, color: "#5B6B68" }}>Recommendation/s:</div>
         <div style={printStylesHalf.ruledBlock}>{cert.recommendation || ""}</div>
       </div>
 
-      <p style={{ fontSize: 13, color: "#5B6B68", marginTop: 16, lineHeight: 1.4 }}>
+      <p style={{ fontSize: 16, color: "#5B6B68", marginTop: 14, lineHeight: 1.4 }}>
         This certificate is being issued upon the request of the above-mentioned name for whatever
         purpose it may serve, excluding legal matters.
       </p>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
-        <div style={{ textAlign: "center", minWidth: 150 }}>
-          <div style={{ height: 18 }} />
-          <div style={{ borderTop: "1px solid #333", paddingTop: 4, fontSize: 15, fontWeight: 600 }}>{provider}</div>
-          <div style={{ fontSize: 13 }}>Medical Doctor</div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+        <div style={{ textAlign: "center", minWidth: 160 }}>
+          <div style={{ height: 16 }} />
+          <div style={{ borderTop: "1px solid #333", paddingTop: 4, fontSize: 18, fontWeight: 600 }}>{provider}</div>
+          <div style={{ fontSize: 16 }}>Medical Doctor</div>
         </div>
       </div>
       {cert.signedBy && (
-        <div style={{ fontSize: 12, color: "#0F5E56", marginTop: 6, textAlign: "right" }}>
+        <div style={{ fontSize: 14, color: "#0F5E56", marginTop: 6, textAlign: "right" }}>
           Electronically signed by {cert.signedBy} — {fmtDateTime(cert.signedAt)}
         </div>
       )}
 
-      <div style={{ fontSize: 13, fontWeight: 700, marginTop: 14 }}>*Not valid without dry seal</div>
+      <div style={{ fontSize: 15, fontWeight: 700, marginTop: 14 }}>*Not valid without dry seal</div>
     </div>
   );
 }
@@ -5239,5 +5240,5 @@ const printStylesHalf = {
   signatureBlock: { textAlign: "center", minWidth: 190 },
   signatureLine: { borderTop: "1.5px solid #333", paddingTop: 6, fontSize: 16, fontWeight: 600 },
   certTitle: { textAlign: "center", fontSize: 23, fontWeight: 800, marginTop: 9, letterSpacing: 0.6 },
-  ruledBlock: { fontSize: 18, lineHeight: 1.7, borderBottom: "1.5px solid #999", minHeight: 50, marginTop: 4, whiteSpace: "pre-wrap" },
+  ruledBlock: { fontSize: 24, lineHeight: 1.5, borderBottom: "1.5px solid #999", minHeight: 62, marginTop: 4, whiteSpace: "pre-wrap" },
 };
