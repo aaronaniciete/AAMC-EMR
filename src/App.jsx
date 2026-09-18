@@ -3758,24 +3758,25 @@ function PrintableMedCert({ cert, patient, clinicInfo, provider }) {
   const issueDate = new Date(cert.date || Date.now());
   return (
     <div style={printStylesHalf.page}>
-      <div style={printStylesHalf.headerRow}>
+      <div style={{ display: "flex", alignItems: "center", borderBottom: "2.5px solid #0F5E56", paddingBottom: 9, marginBottom: 11 }}>
         <div style={printStylesHalf.logoCircle}>
           <Stethoscope size={28} color="#0F5E56" />
         </div>
-        <div>
-          <div style={printStylesHalf.clinicName}>{clinicInfo.name}</div>
+        <div style={{ flex: 1, textAlign: "center", minWidth: 0 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "#0F5E56", letterSpacing: 0.2, lineHeight: 1.15, whiteSpace: "nowrap" }}>{clinicInfo.name}</div>
           <div style={printStylesHalf.clinicSub}>{clinicInfo.address}</div>
           <div style={printStylesHalf.clinicSub}>{clinicInfo.phone}</div>
         </div>
+        <div style={{ width: 54, flexShrink: 0 }} />
       </div>
 
       <div style={{ textAlign: "right", fontSize: 16, margin: "8px 0 12px" }}>
         <b>Date:</b> <Blank minWidth={170}>{fmtDate(issueDate)}</Blank>
       </div>
 
-      <div style={printStylesHalf.certTitle}>MEDICAL CERTIFICATE</div>
+      <div style={{ ...printStylesHalf.certTitle, fontSize: 16 }}>MEDICAL CERTIFICATE</div>
 
-      <div style={{ fontSize: 16, marginTop: 12, lineHeight: 1.6 }}>
+      <div style={{ fontSize: 18, marginTop: 12, lineHeight: 1.6 }}>
         <p style={{ margin: "0 0 6px" }}>To whom it may concern:</p>
         <p style={{ textIndent: "1.5em", margin: 0 }}>
           This is to certify that <Blank minWidth={260}>{patient.name}</Blank>,{" "}
@@ -3788,12 +3789,12 @@ function PrintableMedCert({ cert, patient, clinicInfo, provider }) {
       </div>
 
       <div style={{ marginTop: 12 }}>
-        <div style={{ fontSize: 16, fontWeight: 700 }}>Assessment/Impression:</div>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>Assessment/Impression:</div>
         <div style={printStylesHalf.ruledBlock}>{cert.assessment || ""}</div>
       </div>
 
       <div style={{ marginTop: 12 }}>
-        <div style={{ fontSize: 16, fontWeight: 700 }}>Recommendation/s:</div>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>Recommendation/s:</div>
         <div style={printStylesHalf.ruledBlock}>{cert.recommendation || ""}</div>
       </div>
 
@@ -5234,5 +5235,5 @@ const printStylesHalf = {
   signatureBlock: { textAlign: "center", minWidth: 190 },
   signatureLine: { borderTop: "1.5px solid #333", paddingTop: 6, fontSize: 16, fontWeight: 600 },
   certTitle: { textAlign: "center", fontSize: 23, fontWeight: 800, marginTop: 9, letterSpacing: 0.6 },
-  ruledBlock: { fontSize: 16, lineHeight: 1.7, borderBottom: "1.5px solid #999", minHeight: 50, marginTop: 4, whiteSpace: "pre-wrap" },
+  ruledBlock: { fontSize: 18, lineHeight: 1.7, borderBottom: "1.5px solid #999", minHeight: 50, marginTop: 4, whiteSpace: "pre-wrap" },
 };
