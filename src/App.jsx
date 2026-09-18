@@ -3031,13 +3031,14 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
     <div style={printStylesRxA6.page}>
       <div style={printStylesRxA6.headerRow}>
         <div style={printStylesRxA6.logoCircle}>
-          <Stethoscope size={13} color="#0F5E56" />
+          <Stethoscope size={14} color="#0F5E56" />
         </div>
-        <div>
+        <div style={printStylesRxA6.headerTextCol}>
           <div style={printStylesRxA6.clinicName}>{clinicInfo.name}</div>
           <div style={printStylesRxA6.clinicSub}>{clinicInfo.address}</div>
           <div style={printStylesRxA6.clinicSub}>{clinicInfo.phone}</div>
         </div>
+        <div style={printStylesRxA6.headerSpacer} />
       </div>
 
       <div style={printStylesRxA6.fieldsCol}>
@@ -3090,9 +3091,12 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
 
       <div style={printStylesRxA6.footerRow}>
         <div style={printStylesRxA6.followUp}>Follow-up: ________, {today.getFullYear()}</div>
-        <div style={printStylesRxA6.signatureBlock}>
-          <div style={printStylesRxA6.signatureLine}>{provider}</div>
-          <div style={{ fontSize: 7.5 }}>Medical Doctor</div>
+        <div style={printStylesRxA6.signatureRow}>
+          <div style={printStylesRxA6.signatureBlock}>
+            <div style={printStylesRxA6.signatureSpace} />
+            <div style={printStylesRxA6.signatureLine}>{provider}</div>
+            <div style={{ fontSize: 7.5 }}>Medical Doctor</div>
+          </div>
         </div>
       </div>
       {rx.signedBy && (
@@ -5182,16 +5186,20 @@ const printStyles = {
 // one need genuinely different treatment to both look right on a page this size.
 const printStylesRxA6 = {
   page: { fontFamily: "Arial, Helvetica, sans-serif", color: "#111", padding: "4mm 4.5mm", width: "96mm", boxSizing: "border-box" },
-  headerRow: { display: "flex", alignItems: "center", gap: 6, borderBottom: "1.5px solid #0F5E56", paddingBottom: 4, marginBottom: 5 },
-  logoCircle: { width: 24, height: 24, borderRadius: "50%", border: "1.5px solid #0F5E56", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  clinicName: { fontSize: 11.5, fontWeight: 800, color: "#0F5E56", letterSpacing: 0.1, lineHeight: 1.15 },
-  clinicSub: { fontSize: 7, color: "#333", lineHeight: 1.2 },
+  headerRow: { display: "flex", alignItems: "center", borderBottom: "1.5px solid #0F5E56", paddingBottom: 4, marginBottom: 5 },
+  logoCircle: { width: 26, height: 26, borderRadius: "50%", border: "1.5px solid #0F5E56", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  headerSpacer: { width: 26, flexShrink: 0 },
+  headerTextCol: { flex: 1, textAlign: "center", minWidth: 0 },
+  clinicName: { fontSize: 12.5, fontWeight: 800, color: "#0F5E56", letterSpacing: 0.1, lineHeight: 1.15, whiteSpace: "nowrap" },
+  clinicSub: { fontSize: 9.5, color: "#333", lineHeight: 1.25 },
   fieldsCol: { display: "flex", flexDirection: "column", gap: 2.5, marginBottom: 5 },
   fieldLine: { fontSize: 8, borderBottom: "1px solid #999", paddingBottom: 1 },
-  footerRow: { display: "flex", flexDirection: "column", gap: 6, marginTop: 8 },
-  followUp: { fontSize: 8 },
-  signatureBlock: { textAlign: "center", borderTop: "1px solid #333", paddingTop: 3, marginTop: 2 },
-  signatureLine: { fontSize: 8.5, fontWeight: 600 },
+  footerRow: { marginTop: 8 },
+  followUp: { fontSize: 8, marginBottom: 4 },
+  signatureRow: { display: "flex", justifyContent: "flex-end" },
+  signatureBlock: { textAlign: "center", minWidth: 100 },
+  signatureSpace: { height: 26 },
+  signatureLine: { borderTop: "1px solid #333", paddingTop: 3, fontSize: 8.5, fontWeight: 600 },
 };
 
 // Picks how spacious or compact the medication table gets, purely based on how many
