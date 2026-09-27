@@ -3757,67 +3757,65 @@ function PrintableMedCert({ cert, patient, clinicInfo, provider }) {
   const age = calcAge(patient.dob);
   const issueDate = new Date(cert.date || Date.now());
   return (
-    <div style={{ ...printStylesHalf.page, maxWidth: "136mm" }}>
-      <div style={{ display: "flex", alignItems: "center", borderBottom: "2.5px solid #0F5E56", paddingBottom: 10, marginBottom: 12 }}>
+    <div style={printStylesHalf.page}>
+      <div style={{ display: "flex", alignItems: "center", borderBottom: "2.5px solid #0F5E56", paddingBottom: 9, marginBottom: 11 }}>
         <div style={printStylesHalf.logoCircle}>
           <Stethoscope size={28} color="#0F5E56" />
         </div>
-        <div style={{ flex: 1, textAlign: "center", minWidth: 0, padding: "0 4px" }}>
-          <div style={{ fontSize: 17, fontWeight: 700, color: "#0F5E56" }}>{clinicInfo.name}</div>
-          <div style={{ fontSize: 12, color: "#333", marginTop: 2, lineHeight: 1.3 }}>
-            {clinicInfo.address} &nbsp;·&nbsp; {clinicInfo.phone}
-          </div>
+        <div style={{ flex: 1, textAlign: "center", minWidth: 0 }}>
+          <div style={printStylesHalf.clinicName}>{clinicInfo.name}</div>
+          <div style={printStylesHalf.clinicSub}>{clinicInfo.address}</div>
+          <div style={printStylesHalf.clinicSub}>{clinicInfo.phone}</div>
         </div>
         <div style={{ width: 54, flexShrink: 0 }} />
       </div>
 
-      <div style={{ textAlign: "right", fontSize: 18, margin: "8px 0 12px" }}>
-        <b>Date:</b> <Blank minWidth={130}>{fmtDate(issueDate)}</Blank>
+      <div style={{ textAlign: "right", fontSize: 16, margin: "8px 0 12px" }}>
+        <b>Date:</b> <Blank minWidth={170}>{fmtDate(issueDate)}</Blank>
       </div>
 
-      <div style={{ ...printStylesHalf.certTitle, fontSize: 18 }}>MEDICAL CERTIFICATE</div>
+      <div style={printStylesHalf.certTitle}>MEDICAL CERTIFICATE</div>
 
-      <div style={{ fontSize: 24, marginTop: 14, lineHeight: 1.4 }}>
+      <div style={{ fontSize: 18, marginTop: 12, lineHeight: 1.6 }}>
         <p style={{ margin: "0 0 6px" }}>To whom it may concern:</p>
-        <p style={{ textIndent: "1.3em", margin: 0 }}>
-          This is to certify that <Blank minWidth={180}>{patient.name}</Blank>,{" "}
-          <Blank minWidth={35}>{age !== null ? age : ""}</Blank> years of age,{" "}
-          <Blank minWidth={50}>{patient.sex || ""}</Blank> (sex), residing in{" "}
-          <Blank minWidth={200}>{patient.address || ""}</Blank>, was examined on{" "}
-          <Blank minWidth={100}>{fmtDate(cert.examDate)}</Blank> at our clinic for{" "}
-          <Blank minWidth={200}>{cert.reason || ""}</Blank>.
+        <p style={{ textIndent: "1.5em", margin: 0 }}>
+          This is to certify that <Blank minWidth={260}>{patient.name}</Blank>,{" "}
+          <Blank minWidth={48}>{age !== null ? age : ""}</Blank> years of age,{" "}
+          <Blank minWidth={75}>{patient.sex || ""}</Blank> (sex), currently residing in{" "}
+          <Blank minWidth={300}>{patient.address || ""}</Blank> consulted and was examined on{" "}
+          <Blank minWidth={150}>{fmtDate(cert.examDate)}</Blank> at {clinicInfo.name} for{" "}
+          <Blank minWidth={300}>{cert.reason || ""}</Blank>.
         </p>
       </div>
 
       <div style={{ marginTop: 12 }}>
-        <div style={{ fontSize: 19, fontWeight: 700, color: "#5B6B68" }}>Assessment/Impression:</div>
+        <div style={{ fontSize: 16, fontWeight: 700 }}>Assessment/Impression:</div>
         <div style={printStylesHalf.ruledBlock}>{cert.assessment || ""}</div>
       </div>
 
       <div style={{ marginTop: 12 }}>
-        <div style={{ fontSize: 19, fontWeight: 700, color: "#5B6B68" }}>Recommendation/s:</div>
+        <div style={{ fontSize: 16, fontWeight: 700 }}>Recommendation/s:</div>
         <div style={printStylesHalf.ruledBlock}>{cert.recommendation || ""}</div>
       </div>
 
-      <p style={{ fontSize: 16, color: "#5B6B68", marginTop: 14, lineHeight: 1.4 }}>
+      <p style={{ fontSize: 11, color: "#444", marginTop: 14, lineHeight: 1.35 }}>
         This certificate is being issued upon the request of the above-mentioned name for whatever
         purpose it may serve, excluding legal matters.
       </p>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
-        <div style={{ textAlign: "center", minWidth: 160 }}>
-          <div style={{ height: 16 }} />
-          <div style={{ borderTop: "1px solid #333", paddingTop: 4, fontSize: 18, fontWeight: 600 }}>{provider}</div>
-          <div style={{ fontSize: 16 }}>Medical Doctor</div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 24 }}>
+        <div style={printStylesHalf.signatureBlock}>
+          <div style={printStylesHalf.signatureLine}>{provider}</div>
+          <div style={{ fontSize: 14 }}>Medical Doctor</div>
         </div>
       </div>
       {cert.signedBy && (
-        <div style={{ fontSize: 14, color: "#0F5E56", marginTop: 6, textAlign: "right" }}>
+        <div style={{ fontSize: 13, color: "#0F5E56", marginTop: 6, textAlign: "right" }}>
           Electronically signed by {cert.signedBy} — {fmtDateTime(cert.signedAt)}
         </div>
       )}
 
-      <div style={{ fontSize: 15, fontWeight: 700, marginTop: 14 }}>*Not valid without dry seal</div>
+      <div style={{ fontSize: 14, fontWeight: 700, marginTop: 16 }}>*Not valid without dry seal</div>
     </div>
   );
 }
@@ -5135,18 +5133,15 @@ const globalCss = `
     #rx-print-area, #rx-print-area *, #cert-print-area, #cert-print-area *, #exam-print-area, #exam-print-area *, #lab-print-area, #lab-print-area * { visibility: visible; }
     #rx-print-area, #cert-print-area, #exam-print-area, #lab-print-area { display: block; position: absolute; top: 0; left: 0; width: 100%; }
     @page { margin: 10mm; }
-    /* Each of the three print layouts targets a different real paper size: the certificate is
-       printed on A5 portrait, the lab request on half an A4 sheet (landscape), and the
-       prescription on A6 (see printStylesHalf and printStylesRxA6). Each gets its own page-size
-       hint accordingly. Either hint is a suggestion, not a guarantee — Firefox in particular
-       tends to ignore an exact custom size and fall back to whatever's already selected in the
-       print dialog, which is why every layout stays sized to look right whichever way it
-       ends up printing. */
-    @page cert-a5 { size: 148mm 210mm; margin: 6mm; }
+    /* The certificate and lab request are designed to fit within half of an A4 sheet
+       (see printStylesHalf); the prescription is designed for A6 specifically (see
+       printStylesRxA6), so it gets its own, smaller page-size hint. Either hint is a
+       suggestion, not a guarantee — Firefox in particular tends to ignore an exact custom
+       size and fall back to whatever's already selected in the print dialog (usually A4),
+       which is why both layouts stay sized to look right whichever way they end up printing. */
     @page half-sheet { size: A4 landscape; margin: 4mm; }
     @page rx-a6 { size: 105mm 148.5mm; margin: 3mm; }
-    #cert-print-area { page: cert-a5; }
-    #lab-print-area { page: half-sheet; }
+    #cert-print-area, #lab-print-area { page: half-sheet; }
     #rx-print-area { page: rx-a6; }
   }
 `;
@@ -5240,5 +5235,5 @@ const printStylesHalf = {
   signatureBlock: { textAlign: "center", minWidth: 190 },
   signatureLine: { borderTop: "1.5px solid #333", paddingTop: 6, fontSize: 16, fontWeight: 600 },
   certTitle: { textAlign: "center", fontSize: 23, fontWeight: 800, marginTop: 9, letterSpacing: 0.6 },
-  ruledBlock: { fontSize: 24, lineHeight: 1.5, borderBottom: "1.5px solid #999", minHeight: 62, marginTop: 4, whiteSpace: "pre-wrap" },
+  ruledBlock: { fontSize: 16, lineHeight: 1.7, borderBottom: "1.5px solid #999", minHeight: 50, marginTop: 4, whiteSpace: "pre-wrap" },
 };
