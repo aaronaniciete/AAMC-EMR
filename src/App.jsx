@@ -5132,6 +5132,12 @@ const globalCss = `
     body * { visibility: hidden; }
     #rx-print-area, #rx-print-area *, #cert-print-area, #cert-print-area *, #exam-print-area, #exam-print-area *, #lab-print-area, #lab-print-area * { visibility: visible; }
     #rx-print-area, #cert-print-area, #exam-print-area, #lab-print-area { display: block; position: absolute; top: 0; left: 0; width: 100%; }
+    /* visibility: hidden above hides the rest of the app visually, but doesn't remove it from
+       layout — so whatever view was open (a long patient list, say) still contributes its full
+       height to the document, and the browser generates that many blank pages after the one
+       real page. Collapsing html/body's own height here fixes that: the print area is
+       positioned absolutely, so it isn't affected by its ancestor's height collapsing. */
+    html, body { height: 0 !important; overflow: hidden !important; }
     @page { margin: 10mm; }
     /* The certificate and lab request are designed to fit within half of an A4 sheet
        (see printStylesHalf); the prescription targets 5x7in specifically (see printStylesRxA6
