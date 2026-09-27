@@ -3031,7 +3031,7 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
     <div style={printStylesRxA6.page}>
       <div style={printStylesRxA6.headerRow}>
         <div style={printStylesRxA6.logoCircle}>
-          <Stethoscope size={14} color="#0F5E56" />
+          <Stethoscope size={17} color="#0F5E56" />
         </div>
         <div style={printStylesRxA6.headerTextCol}>
           <div style={printStylesRxA6.clinicName}>{clinicInfo.name}</div>
@@ -3058,12 +3058,12 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr>
-            <th style={{ ...th, width: 14 }}>No</th>
+            <th style={{ ...th, width: 17 }}>No</th>
             <th style={th}>Medications and Dosage</th>
-            <th style={{ ...th, width: 20 }}>AM</th>
-            <th style={{ ...th, width: 20 }}>NN</th>
-            <th style={{ ...th, width: 20 }}>PM</th>
-            <th style={{ ...th, width: 88 }}>Remarks</th>
+            <th style={{ ...th, width: 24 }}>AM</th>
+            <th style={{ ...th, width: 24 }}>NN</th>
+            <th style={{ ...th, width: 24 }}>PM</th>
+            <th style={{ ...th, width: 106 }}>Remarks</th>
           </tr>
         </thead>
         <tbody>
@@ -3084,7 +3084,7 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
       </table>
 
       {rx.notes && (
-        <div style={{ fontSize: Math.max(tier.tableFont, 7.5), marginTop: 6 }}>
+        <div style={{ fontSize: Math.max(tier.tableFont, 9), marginTop: 7 }}>
           <b>Notes:</b> {rx.notes}
         </div>
       )}
@@ -3095,12 +3095,12 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
           <div style={printStylesRxA6.signatureBlock}>
             <div style={printStylesRxA6.signatureSpace} />
             <div style={printStylesRxA6.signatureLine}>{provider}</div>
-            <div style={{ fontSize: 7.5 }}>Medical Doctor</div>
+            <div style={{ fontSize: 9 }}>Medical Doctor</div>
           </div>
         </div>
       </div>
       {rx.signedBy && (
-        <div style={{ fontSize: 6.5, color: "#0F5E56", marginTop: 4, textAlign: "right" }}>
+        <div style={{ fontSize: 8, color: "#0F5E56", marginTop: 5, textAlign: "right" }}>
           Electronically signed by {rx.signedBy} — {fmtDateTime(rx.signedAt)}
         </div>
       )}
@@ -5134,13 +5134,13 @@ const globalCss = `
     #rx-print-area, #cert-print-area, #exam-print-area, #lab-print-area { display: block; position: absolute; top: 0; left: 0; width: 100%; }
     @page { margin: 10mm; }
     /* The certificate and lab request are designed to fit within half of an A4 sheet
-       (see printStylesHalf); the prescription is designed for A6 specifically (see
-       printStylesRxA6), so it gets its own, smaller page-size hint. Either hint is a
-       suggestion, not a guarantee — Firefox in particular tends to ignore an exact custom
-       size and fall back to whatever's already selected in the print dialog (usually A4),
-       which is why both layouts stay sized to look right whichever way they end up printing. */
+       (see printStylesHalf); the prescription targets 5x7in specifically (see printStylesRxA6
+       — this is what Firefox actually lands on in practice, since it doesn't reliably honor an
+       exact custom size like true A6 and falls back to the closest standard size in its print
+       dialog). Either hint is a suggestion, not a guarantee, which is why both layouts stay
+       sized to look right whichever way they end up printing. */
     @page half-sheet { size: A4 landscape; margin: 4mm; }
-    @page rx-a6 { size: 105mm 148.5mm; margin: 3mm; }
+    @page rx-a6 { size: 5in 7in; margin: 3mm; }
     #cert-print-area, #lab-print-area { page: half-sheet; }
     #rx-print-area { page: rx-a6; }
   }
@@ -5179,28 +5179,32 @@ const printStyles = {
 // printer), since browsers don't reliably honor a custom small paper size in the print dialog
 // itself — Firefox in particular tends to fall back to whatever's selected there (usually A4)
 // regardless of what a stylesheet asks for. A visible dashed line marks where to cut.
-// Print styles specifically for the prescription, purpose-built for A6 paper (105mm x 148.5mm)
-// in portrait orientation. Certificates and lab requests use the separate printStylesHalf below
+// Print styles specifically for the prescription. Actually targets 5x7in (127mm x 178mm)
+// in portrait — not true A6 (105mm x 148.5mm) — because Firefox doesn't reliably honor an
+// exact custom @page size and instead falls back to the closest standard size selected in its
+// print dialog, and 5x7in is that closest standard match. Sizing here is calibrated to that
+// real, larger canvas so it actually fills it, not to the smaller nominal A6 that was never
+// the real print target. Certificates and lab requests use the separate printStylesHalf below
 // and are unaffected by this — this only applies to the prescription. The parts that don't
 // depend on how many medications are on the prescription live here; the table itself is sized
 // dynamically by getRxDensityTier below, since a 1-medication prescription and a 6-medication
 // one need genuinely different treatment to both look right on a page this size.
 const printStylesRxA6 = {
-  page: { fontFamily: "Arial, Helvetica, sans-serif", color: "#111", padding: "4mm 4.5mm", width: "96mm", boxSizing: "border-box" },
-  headerRow: { display: "flex", alignItems: "center", borderBottom: "1.5px solid #0F5E56", paddingBottom: 4, marginBottom: 5 },
-  logoCircle: { width: 26, height: 26, borderRadius: "50%", border: "1.5px solid #0F5E56", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  headerSpacer: { width: 26, flexShrink: 0 },
+  page: { fontFamily: "Arial, Helvetica, sans-serif", color: "#111", padding: "5mm 5.5mm", width: "115mm", boxSizing: "border-box" },
+  headerRow: { display: "flex", alignItems: "center", borderBottom: "1.5px solid #0F5E56", paddingBottom: 5, marginBottom: 6 },
+  logoCircle: { width: 31, height: 31, borderRadius: "50%", border: "1.5px solid #0F5E56", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  headerSpacer: { width: 31, flexShrink: 0 },
   headerTextCol: { flex: 1, textAlign: "center", minWidth: 0 },
-  clinicName: { fontSize: 12.5, fontWeight: 800, color: "#0F5E56", letterSpacing: 0.1, lineHeight: 1.15, whiteSpace: "nowrap" },
-  clinicSub: { fontSize: 9.5, color: "#333", lineHeight: 1.25 },
-  fieldsCol: { display: "flex", flexDirection: "column", gap: 2.5, marginBottom: 5 },
-  fieldLine: { fontSize: 8, borderBottom: "1px solid #999", paddingBottom: 1 },
-  footerRow: { marginTop: 8 },
-  followUp: { fontSize: 8, marginBottom: 4 },
+  clinicName: { fontSize: 15, fontWeight: 800, color: "#0F5E56", letterSpacing: 0.1, lineHeight: 1.15, whiteSpace: "nowrap" },
+  clinicSub: { fontSize: 11.5, color: "#333", lineHeight: 1.25 },
+  fieldsCol: { display: "flex", flexDirection: "column", gap: 3, marginBottom: 6 },
+  fieldLine: { fontSize: 9.5, borderBottom: "1px solid #999", paddingBottom: 1 },
+  footerRow: { marginTop: 10 },
+  followUp: { fontSize: 9.5, marginBottom: 5 },
   signatureRow: { display: "flex", justifyContent: "flex-end" },
-  signatureBlock: { textAlign: "center", minWidth: 100 },
-  signatureSpace: { height: 26 },
-  signatureLine: { borderTop: "1px solid #333", paddingTop: 3, fontSize: 8.5, fontWeight: 600 },
+  signatureBlock: { textAlign: "center", minWidth: 120 },
+  signatureSpace: { height: 31 },
+  signatureLine: { borderTop: "1px solid #333", paddingTop: 4, fontSize: 10, fontWeight: 600 },
 };
 
 // Picks how spacious or compact the medication table gets, purely based on how many
@@ -5209,11 +5213,11 @@ const printStylesRxA6 = {
 // stopping at a floor that's tight but still meant to be legible, not a font size that just
 // happens to fit.
 function getRxDensityTier(medCount) {
-  if (medCount <= 2) return { rxMark: 26, tableFont: 11.5, medNameFont: 17, thFont: 10, cellPad: "6px 4px", indicationFont: 9 };
-  if (medCount <= 3) return { rxMark: 22, tableFont: 10, medNameFont: 15, thFont: 9, cellPad: "4.5px 3.5px", indicationFont: 8 };
-  if (medCount <= 4) return { rxMark: 19, tableFont: 9, medNameFont: 13.5, thFont: 8, cellPad: "3.5px 3px", indicationFont: 7.3 };
-  if (medCount <= 6) return { rxMark: 16, tableFont: 8, medNameFont: 12, thFont: 7.3, cellPad: "2.5px 2.5px", indicationFont: 6.7 };
-  return { rxMark: 14, tableFont: 7.2, medNameFont: 11, thFont: 6.6, cellPad: "1.8px 2px", indicationFont: 6.2 };
+  if (medCount <= 2) return { rxMark: 31, tableFont: 14, medNameFont: 20, thFont: 12, cellPad: "7px 5px", indicationFont: 11 };
+  if (medCount <= 3) return { rxMark: 26, tableFont: 12, medNameFont: 18, thFont: 11, cellPad: "5.5px 4px", indicationFont: 9.5 };
+  if (medCount <= 4) return { rxMark: 23, tableFont: 11, medNameFont: 16, thFont: 9.5, cellPad: "4.5px 3.5px", indicationFont: 8.75 };
+  if (medCount <= 6) return { rxMark: 19, tableFont: 9.5, medNameFont: 14.5, thFont: 8.75, cellPad: "3px 3px", indicationFont: 8 };
+  return { rxMark: 17, tableFont: 8.5, medNameFont: 13, thFont: 8, cellPad: "2.2px 2.5px", indicationFont: 7.5 };
 }
 
 const printStylesHalf = {
