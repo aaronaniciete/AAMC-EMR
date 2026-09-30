@@ -376,7 +376,18 @@ async function loadClinicData() {
 }
 async function saveClinicData(data) {
   const { error } = await supabase.from("app_state").upsert({ key: "clinic-data", value: data, updated_at: new Date().toISOString() });
-  if (error) console.error("saveClinicData failed", error);
+  if (error) { console.error("saveClinicData failed", error); return false; }
+  return true;
+}
+// Used by persist() right before every save, specifically so a failed re-fetch is
+// distinguishable from "the database is genuinely empty" — unlike loadClinicData
+// above (used on initial app load, where falling back to empty data is reasonable),
+// persist() must never mistake a network failure for an empty database, since
+// building a save on that false premise risks wiping out everything really in it.
+async function fetchLatestClinicData() {
+  const { data, error } = await supabase.from("app_state").select("value").eq("key", "clinic-data").maybeSingle();
+  if (error) { console.error("fetchLatestClinicData failed", error); return null; }
+  return data ? { ...emptyData(), ...data.value } : emptyData();
 }
 async function loadClinicInfo() {
   const { data, error } = await supabase.from("app_state").select("value").eq("key", "clinic-info").maybeSingle();
@@ -755,6 +766,13 @@ export default function ClinicEMR() {
   const [myProfile, setMyProfile] = useState(null);
   const [dataLoading, setDataLoading] = useState(false);
   const [data, setData] = useState(emptyData());
+  // Mirrors `data` on every change, so persist() below can always see exactly what
+  // THIS session knew before its current save — even though persist() itself is
+  // memoized once with useCallback([]) — which is what lets it tell which specific
+  // records this save actually changed, as opposed to everything else in `data`
+  // that just came along for the ride via object-spread.
+  const dataRef = useRef(data);
+  useEffect(() => { dataRef.current = data; }, [data]);
   const [staffList, setStaffList] = useState([]);
   const [clinicInfo, setClinicInfo] = useState(defaultClinicInfo());
   const [commonMeds, setCommonMeds] = useState(defaultCommonMeds());
@@ -1004,9 +1022,62 @@ export default function ClinicEMR() {
     showToast("Registration declined");
   }
 
+  // Merges one field's new value against the freshest database copy. Every array in
+  // this data model (patients, treatmentPlans, prescriptions, certificates,
+  // physicalExams, labRequests, auditLog...) holds records with a unique `id`, so for
+  // those we merge record-by-record: a record THIS session added or edited survives
+  // alongside a DIFFERENT record another session added or edited to the same array in
+  // the meantime, rather than one whole save overwriting the other's work. Anything
+  // that isn't an id-keyed array falls back to "this session's value wins" — safe here
+  // because persist() below only ever calls this for a field this session actually
+  // changed (see the diffing loop there).
+  function mergeField(freshValue, staleValue, nextValue) {
+    if (!Array.isArray(nextValue) || !Array.isArray(freshValue) || !nextValue.every((x) => x && typeof x === "object" && "id" in x)) {
+      return nextValue;
+    }
+    const staleById = new Map((staleValue || []).map((x) => [x.id, x]));
+    const merged = new Map(freshValue.map((x) => [x.id, x])); // start from what's really in the database
+    for (const item of nextValue) {
+      // Unchanged by this session (same reference as what this session last knew) —
+      // leave whatever the fresh copy has, in case another session edited it.
+      // Otherwise, this session added or edited it, so this session's version wins.
+      if (staleById.get(item.id) !== item) merged.set(item.id, item);
+    }
+    return Array.from(merged.values());
+  }
+
+  // Two accounts (front desk and doctor, typically) are open at once as a matter of
+  // course, and every save here rewrites the *entire* clinic-data record rather than
+  // one row — so without this, whichever of the two saves second would silently wipe
+  // out whatever the other just added, with no error and no warning, only noticed
+  // later as "the patient I added is just gone." To prevent that, persist() re-fetches
+  // the database's actual current state right before writing, then applies only the
+  // specific fields (and, within them, the specific records) THIS action actually
+  // changed — everything else comes from that fresh copy, so a concurrent save from
+  // the other account is preserved rather than overwritten.
   const persist = useCallback(async (next) => {
-    setData(next);
-    await saveClinicData(next);
+    const stale = dataRef.current;
+    const fresh = await fetchLatestClinicData();
+    if (!fresh) {
+      // A failed re-fetch must never be treated as "the database is empty" — that
+      // would risk saving a near-blank record over everything really there. Stop
+      // here instead, and say so plainly rather than failing silently: this exact
+      // silence (a save that looked fine on screen but never actually happened) is
+      // what caused patients to disappear on Sep 29.
+      showToast("Couldn't save — check your connection and try again. Nothing was saved.");
+      return false;
+    }
+    const merged = { ...fresh };
+    for (const key of Object.keys(next)) {
+      if (next[key] !== stale[key]) merged[key] = mergeField(fresh[key], stale[key], next[key]);
+    }
+    setData(merged);
+    const ok = await saveClinicData(merged);
+    if (!ok) {
+      showToast("Save failed — check your connection and try again.");
+      return false;
+    }
+    return true;
   }, []);
 
   const persistClinicInfo = useCallback(async (next) => {
