@@ -374,20 +374,79 @@ async function loadClinicData() {
   if (error) { console.error("loadClinicData failed", error); return emptyData(); }
   return data ? { ...emptyData(), ...data.value } : emptyData();
 }
-async function saveClinicData(data) {
-  const { error } = await supabase.from("app_state").upsert({ key: "clinic-data", value: data, updated_at: new Date().toISOString() });
-  if (error) { console.error("saveClinicData failed", error); return false; }
-  return true;
+// Merges one field's new value against the freshest database copy. Every array in this
+// data model (patients, appointments, treatmentPlans, prescriptions, certificates,
+// physicalExams, labRequests, auditLog...) holds records with a unique `id`, so for those
+// we merge record-by-record: a record one save added or edited survives alongside a
+// DIFFERENT record another save added or edited to the same array, rather than one whole
+// save overwriting the other's work. Anything that isn't an id-keyed array falls back to
+// "the new value wins" — safe here because saveWithConflictRetry below only ever calls
+// this for a field that actually changed (see its diffing loop).
+function mergeField(freshValue, staleValue, nextValue) {
+  if (!Array.isArray(nextValue) || !Array.isArray(freshValue) || !nextValue.every((x) => x && typeof x === "object" && "id" in x)) {
+    return nextValue;
+  }
+  const staleById = new Map((staleValue || []).map((x) => [x.id, x]));
+  const merged = new Map(freshValue.map((x) => [x.id, x])); // start from what's really in the database
+  for (const item of nextValue) {
+    // Unchanged since `stale` (same reference) — leave whatever the fresh copy has, in
+    // case another save edited it. Otherwise this save added or edited it, so it wins.
+    if (staleById.get(item.id) !== item) merged.set(item.id, item);
+  }
+  return Array.from(merged.values());
 }
-// Used by persist() right before every save, specifically so a failed re-fetch is
-// distinguishable from "the database is genuinely empty" — unlike loadClinicData
-// above (used on initial app load, where falling back to empty data is reasonable),
-// persist() must never mistake a network failure for an empty database, since
-// building a save on that false premise risks wiping out everything really in it.
-async function fetchLatestClinicData() {
-  const { data, error } = await supabase.from("app_state").select("value").eq("key", "clinic-data").maybeSingle();
-  if (error) { console.error("fetchLatestClinicData failed", error); return null; }
-  return data ? { ...emptyData(), ...data.value } : emptyData();
+
+// The safe way to save clinic-data, used everywhere a save happens (both the normal
+// persist() below and the one-time startup backfill). Two accounts (front desk and
+// doctor) are open at once as a matter of course, and this record holds everything —
+// patients, appointments, all of it — as one block rather than one row per record, so
+// naively overwriting it is how a patient someone just added can silently vanish when a
+// second, unrelated save lands right after.
+//
+// A first version of this fix re-checked the database immediately before writing, which
+// closed most of that gap but not all of it: two saves close enough together in time
+// could still both read before either had written, so both would build their merge on
+// the same "before" snapshot and one would still overwrite the other — which is exactly
+// what happened on Sep 30 despite that fix being live. This version closes the gap
+// completely: the check and the write happen as a single atomic database operation
+// (UPDATE ... WHERE updated_at = <the value just read>), so if anything else has saved
+// in between, the write itself is rejected outright rather than merely racing another
+// write — and only then does this retry: re-read whatever is now actually there, rebuild
+// the merge on top of that, and try again. Every attempt is genuinely atomic; nothing
+// prevents readers using loadClinicData meanwhile, only concurrent WRITERS collide, and
+// only that collision is what's being resolved here.
+async function saveWithConflictRetry(stale, next) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { data: row, error: readError } = await supabase.from("app_state").select("value, updated_at").eq("key", "clinic-data").maybeSingle();
+    if (readError) { console.error("saveWithConflictRetry: read failed", readError); return { ok: false, reason: "network" }; }
+    const fresh = row ? { ...emptyData(), ...row.value } : emptyData();
+    const expectedUpdatedAt = row ? row.updated_at : null;
+    const merged = { ...fresh };
+    for (const key of Object.keys(next)) {
+      if (next[key] !== stale[key]) merged[key] = mergeField(fresh[key], stale[key], next[key]);
+    }
+    const nowIso = new Date().toISOString();
+    if (expectedUpdatedAt === null) {
+      // No row exists yet — create it. If another save creates it first in the meantime,
+      // this fails on the key's uniqueness constraint; treat that as a conflict and retry
+      // as a normal update on the next loop iteration.
+      const { error: insertError } = await supabase.from("app_state").insert({ key: "clinic-data", value: merged, updated_at: nowIso });
+      if (!insertError) return { ok: true, data: merged };
+      if (insertError.code !== "23505") { console.error("saveWithConflictRetry: insert failed", insertError); return { ok: false, reason: "network" }; }
+      continue;
+    }
+    const { data: updatedRows, error: updateError } = await supabase
+      .from("app_state")
+      .update({ value: merged, updated_at: nowIso })
+      .eq("key", "clinic-data")
+      .eq("updated_at", expectedUpdatedAt)
+      .select();
+    if (updateError) { console.error("saveWithConflictRetry: update failed", updateError); return { ok: false, reason: "network" }; }
+    if (updatedRows && updatedRows.length > 0) return { ok: true, data: merged };
+    // Someone else's write landed between our read and write attempt — loop and retry
+    // against whatever is now actually there.
+  }
+  return { ok: false, reason: "conflict" };
 }
 async function loadClinicInfo() {
   const { data, error } = await supabase.from("app_state").select("value").eq("key", "clinic-info").maybeSingle();
@@ -843,10 +902,21 @@ export default function ClinicEMR() {
         return changed ? { ...rx, meds: updated } : rx;
       });
       const finalData = prescriptionsChanged ? { ...d, prescriptions: backfilledPrescriptions } : d;
-      if (prescriptionsChanged) await saveClinicData(finalData);
+      // This runs on every load, including a refresh — with two accounts typically open
+      // at once, that's exactly the kind of save that must go through the same
+      // conflict-safe path as everything else, not a direct write straight to the
+      // database. A direct write here was, in fact, one of the two real causes behind
+      // patients and appointments disappearing.
+      let dataToUse = finalData;
+      if (prescriptionsChanged) {
+        const result = await saveWithConflictRetry(d, finalData);
+        if (result.ok) dataToUse = result.data;
+        // On failure, fall back to finalData for THIS load — it's still reasonable data
+        // to show, and this backfill is self-healing: it will simply try again next load.
+      }
 
       setMyProfile(profile);
-      setData(finalData);
+      setData(dataToUse);
       setClinicInfo(c);
       setStaffList(allStaff);
       setCommonMeds(meds);
@@ -1022,61 +1092,20 @@ export default function ClinicEMR() {
     showToast("Registration declined");
   }
 
-  // Merges one field's new value against the freshest database copy. Every array in
-  // this data model (patients, treatmentPlans, prescriptions, certificates,
-  // physicalExams, labRequests, auditLog...) holds records with a unique `id`, so for
-  // those we merge record-by-record: a record THIS session added or edited survives
-  // alongside a DIFFERENT record another session added or edited to the same array in
-  // the meantime, rather than one whole save overwriting the other's work. Anything
-  // that isn't an id-keyed array falls back to "this session's value wins" — safe here
-  // because persist() below only ever calls this for a field this session actually
-  // changed (see the diffing loop there).
-  function mergeField(freshValue, staleValue, nextValue) {
-    if (!Array.isArray(nextValue) || !Array.isArray(freshValue) || !nextValue.every((x) => x && typeof x === "object" && "id" in x)) {
-      return nextValue;
-    }
-    const staleById = new Map((staleValue || []).map((x) => [x.id, x]));
-    const merged = new Map(freshValue.map((x) => [x.id, x])); // start from what's really in the database
-    for (const item of nextValue) {
-      // Unchanged by this session (same reference as what this session last knew) —
-      // leave whatever the fresh copy has, in case another session edited it.
-      // Otherwise, this session added or edited it, so this session's version wins.
-      if (staleById.get(item.id) !== item) merged.set(item.id, item);
-    }
-    return Array.from(merged.values());
-  }
-
-  // Two accounts (front desk and doctor, typically) are open at once as a matter of
-  // course, and every save here rewrites the *entire* clinic-data record rather than
-  // one row — so without this, whichever of the two saves second would silently wipe
-  // out whatever the other just added, with no error and no warning, only noticed
-  // later as "the patient I added is just gone." To prevent that, persist() re-fetches
-  // the database's actual current state right before writing, then applies only the
-  // specific fields (and, within them, the specific records) THIS action actually
-  // changed — everything else comes from that fresh copy, so a concurrent save from
-  // the other account is preserved rather than overwritten.
+  // See saveWithConflictRetry (top of file) for how this actually stays safe with two
+  // accounts saving at once.
   const persist = useCallback(async (next) => {
     const stale = dataRef.current;
-    const fresh = await fetchLatestClinicData();
-    if (!fresh) {
-      // A failed re-fetch must never be treated as "the database is empty" — that
-      // would risk saving a near-blank record over everything really there. Stop
-      // here instead, and say so plainly rather than failing silently: this exact
-      // silence (a save that looked fine on screen but never actually happened) is
-      // what caused patients to disappear on Sep 29.
-      showToast("Couldn't save — check your connection and try again. Nothing was saved.");
+    const result = await saveWithConflictRetry(stale, next);
+    if (!result.ok) {
+      showToast(
+        result.reason === "conflict"
+          ? "Save failed after several attempts — please try again."
+          : "Couldn't save — check your connection and try again. Nothing was saved."
+      );
       return false;
     }
-    const merged = { ...fresh };
-    for (const key of Object.keys(next)) {
-      if (next[key] !== stale[key]) merged[key] = mergeField(fresh[key], stale[key], next[key]);
-    }
-    setData(merged);
-    const ok = await saveClinicData(merged);
-    if (!ok) {
-      showToast("Save failed — check your connection and try again.");
-      return false;
-    }
+    setData(result.data);
     return true;
   }, []);
 
