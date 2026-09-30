@@ -382,18 +382,43 @@ async function loadClinicData() {
 // save overwriting the other's work. Anything that isn't an id-keyed array falls back to
 // "the new value wins" — safe here because saveWithConflictRetry below only ever calls
 // this for a field that actually changed (see its diffing loop).
+//
+// Critically, this recurses: a patient record itself has fields (like `history`, its
+// chart notes) that are ALSO id-keyed arrays. Without recursing into those, two saves
+// that both touch the SAME patient — one adding a chart note, another editing something
+// else on that same patient — would still be treated as a single conflicting unit, and
+// whichever save landed would silently replace the whole patient record, discarding the
+// other's edit even though the two never actually touched the same piece of data. This
+// is exactly what let a chart note vanish on Sep 30 even after the top-level fix.
 function mergeField(freshValue, staleValue, nextValue) {
   if (!Array.isArray(nextValue) || !Array.isArray(freshValue) || !nextValue.every((x) => x && typeof x === "object" && "id" in x)) {
     return nextValue;
   }
   const staleById = new Map((staleValue || []).map((x) => [x.id, x]));
-  const merged = new Map(freshValue.map((x) => [x.id, x])); // start from what's really in the database
+  const freshById = new Map(freshValue.map((x) => [x.id, x]));
+  const merged = new Map(freshById); // start from what's really in the database
   for (const item of nextValue) {
-    // Unchanged since `stale` (same reference) — leave whatever the fresh copy has, in
-    // case another save edited it. Otherwise this save added or edited it, so it wins.
-    if (staleById.get(item.id) !== item) merged.set(item.id, item);
+    const staleVersion = staleById.get(item.id);
+    if (staleVersion === item) continue; // unchanged since `stale` — leave fresh's version
+    const freshVersion = freshById.get(item.id);
+    // This record exists in both fresh and this session's prior knowledge, and this
+    // session changed it — recurse into ITS fields, rather than replacing it whole, so a
+    // different field changed by another save (or another item in one of ITS OWN nested
+    // arrays) survives too.
+    merged.set(item.id, freshVersion && staleVersion ? mergeRecord(freshVersion, staleVersion, item) : item);
   }
   return Array.from(merged.values());
+}
+
+// Merges one field of a single record: same idea as mergeField's top-level diffing loop,
+// just one level down, so it can recurse arbitrarily deep (a patient's chart notes are
+// the only case today, but this makes no assumption about depth).
+function mergeRecord(freshRecord, staleRecord, nextRecord) {
+  const merged = { ...freshRecord };
+  for (const key of Object.keys(nextRecord)) {
+    if (nextRecord[key] !== staleRecord[key]) merged[key] = mergeField(freshRecord[key], staleRecord[key], nextRecord[key]);
+  }
+  return merged;
 }
 
 // The safe way to save clinic-data, used everywhere a save happens (both the normal
