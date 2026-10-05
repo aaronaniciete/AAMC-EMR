@@ -4311,7 +4311,7 @@ function PrintableLabRequest({ lab, patient, clinicInfo, provider }) {
     <div style={printStylesLabA6.page}>
       <div style={printStylesLabA6.headerRow}>
         <div style={printStylesLabA6.logoCircle}>
-          <Stethoscope size={14} color="#0F5E56" />
+          <Stethoscope size={18} color="#0F5E56" />
         </div>
         <div style={printStylesLabA6.headerTextCol}>
           <div style={printStylesLabA6.clinicName}>{clinicInfo.name}</div>
@@ -4333,7 +4333,7 @@ function PrintableLabRequest({ lab, patient, clinicInfo, provider }) {
         <b>Age/Sex:</b> {age !== null ? `${age}` : ""}{age !== null && patient.sex ? " / " : ""}{(patient.sex || "").slice(0, 1)}
       </div>
 
-      <div style={{ display: "flex", gap: 10, marginTop: 7 }}>
+      <div style={{ display: "flex", gap: 14, marginTop: 10 }}>
         {[colA, colB].map((col, ci) => (
           <div key={ci} style={printStylesLabA6.checklistCol}>
             {col.map((t) => (
@@ -4348,14 +4348,14 @@ function PrintableLabRequest({ lab, patient, clinicInfo, provider }) {
         ))}
       </div>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
         <div style={printStylesLabA6.signatureBlock}>
           <div style={printStylesLabA6.signatureLine}>{provider}, MD</div>
-          <div style={{ fontSize: 6.8 }}>License No. _____________</div>
+          <div style={{ fontSize: 9 }}>License No. _____________</div>
         </div>
       </div>
       {lab.signedBy && (
-        <div style={{ fontSize: 6.3, color: "#0F5E56", marginTop: 4, textAlign: "right" }}>
+        <div style={{ fontSize: 8.5, color: "#0F5E56", marginTop: 6, textAlign: "right" }}>
           Signed by {lab.signedBy} — {fmtDateTime(lab.signedAt)}
         </div>
       )}
@@ -5420,18 +5420,22 @@ function getRxDensityTier(medCount) {
 // variable number of medications, so one carefully-sized layout covers every print.
 // Certificates keep using the separate printStylesHalf below and are unaffected by this.
 const printStylesLabA6 = {
-  page: { fontFamily: "Arial, Helvetica, sans-serif", color: "#111", padding: "4mm 4.5mm", width: "96mm", boxSizing: "border-box" },
-  headerRow: { display: "flex", alignItems: "center", borderBottom: "1.5px solid #0F5E56", paddingBottom: 4, marginBottom: 5 },
-  logoCircle: { width: 26, height: 26, borderRadius: "50%", border: "1.5px solid #0F5E56", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  headerSpacer: { width: 26, flexShrink: 0 },
+  page: { fontFamily: "Arial, Helvetica, sans-serif", color: "#111", padding: "5mm 5.5mm", width: "96mm", boxSizing: "border-box" },
+  headerRow: { display: "flex", alignItems: "center", borderBottom: "2px solid #0F5E56", paddingBottom: 5, marginBottom: 7 },
+  logoCircle: { width: 34, height: 34, borderRadius: "50%", border: "2px solid #0F5E56", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  headerSpacer: { width: 34, flexShrink: 0 },
   headerTextCol: { flex: 1, textAlign: "center", minWidth: 0 },
-  clinicName: { fontSize: 11.5, fontWeight: 800, color: "#0F5E56", letterSpacing: 0.1, lineHeight: 1.15 },
-  clinicSub: { fontSize: 7.3, color: "#333", lineHeight: 1.25 },
-  title: { textAlign: "center", fontSize: 9.5, fontWeight: 800, letterSpacing: 0.6, marginTop: 5, lineHeight: 1.3 },
-  fieldLine: { fontSize: 7.8, marginTop: 4 },
-  checklistCol: { flex: 1, fontSize: 7.3, lineHeight: 1.42 },
-  signatureBlock: { textAlign: "center", minWidth: 85 },
-  signatureLine: { borderTop: "1px solid #333", paddingTop: 2, fontSize: 8, fontWeight: 600 },
+  clinicName: { fontSize: 15, fontWeight: 800, color: "#0F5E56", letterSpacing: 0.1, lineHeight: 1.15 },
+  clinicSub: { fontSize: 9.5, color: "#333", lineHeight: 1.25 },
+  title: { textAlign: "center", fontSize: 13, fontWeight: 800, letterSpacing: 0.6, marginTop: 7, lineHeight: 1.3 },
+  fieldLine: { fontSize: 10.5, marginTop: 6 },
+  // Deliberately scaled up less than everything else: this is the one part of the page
+  // with no slack — all 37 tests must fit in the taller column regardless of how much
+  // blank space the rest of the page has to spare, so it stays closer to its original,
+  // tested-to-fit size while the rest of the page grows to use the space.
+  checklistCol: { flex: 1, fontSize: 8.3, lineHeight: 1.4 },
+  signatureBlock: { textAlign: "center", minWidth: 100 },
+  signatureLine: { borderTop: "1.5px solid #333", paddingTop: 3, fontSize: 10.5, fontWeight: 600 },
 };
 
 const printStylesHalf = {
