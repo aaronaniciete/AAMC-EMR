@@ -4308,51 +4308,55 @@ function PrintableLabRequest({ lab, patient, clinicInfo, provider }) {
   const colB = LAB_TEST_CHECKLIST.slice(half);
 
   return (
-    <div style={printStylesHalf.page}>
-      <div style={printStylesHalf.headerRow}>
-        <div style={printStylesHalf.logoCircle}>
-          <Stethoscope size={28} color="#0F5E56" />
+    <div style={printStylesLabA6.page}>
+      <div style={printStylesLabA6.headerRow}>
+        <div style={printStylesLabA6.logoCircle}>
+          <Stethoscope size={14} color="#0F5E56" />
         </div>
-        <div>
-          <div style={printStylesHalf.clinicName}>{clinicInfo.name}</div>
-          <div style={printStylesHalf.clinicSub}>{clinicInfo.address}</div>
-          <div style={printStylesHalf.clinicSub}>Contact number {clinicInfo.phone}</div>
+        <div style={printStylesLabA6.headerTextCol}>
+          <div style={printStylesLabA6.clinicName}>{clinicInfo.name}</div>
+          <div style={printStylesLabA6.clinicSub}>{clinicInfo.address}</div>
+          <div style={printStylesLabA6.clinicSub}>{clinicInfo.phone}</div>
         </div>
+        <div style={printStylesLabA6.headerSpacer} />
       </div>
 
-      <div style={{ ...printStylesHalf.certTitle, letterSpacing: 1.2 }}>LABORATORY AND DIAGNOSTIC REQUEST</div>
+      <div style={printStylesLabA6.title}>LABORATORY AND DIAGNOSTIC REQUEST</div>
 
-      <div style={{ fontSize: 16, marginTop: 15 }}>
-        Name: <Blank minWidth={370}>{patient.name}</Blank> &nbsp;&nbsp; Date: <Blank minWidth={130}>{fmtDate(issueDate)}</Blank>
+      <div style={printStylesLabA6.fieldLine}>
+        <b>Name:</b> {patient.name} &nbsp; <b>Date:</b> {fmtDate(issueDate)}
       </div>
-      <div style={{ fontSize: 16, marginTop: 9 }}>
-        Address: <Blank minWidth={370}>{patient.address || ""}</Blank> &nbsp;&nbsp; Age/Sex: <Blank minWidth={100}>{age !== null ? `${age}` : ""}{age !== null && patient.sex ? " / " : ""}{(patient.sex || "").slice(0, 1)}</Blank>
+      <div style={printStylesLabA6.fieldLine}>
+        <b>Address:</b> {patient.address || ""}
+      </div>
+      <div style={printStylesLabA6.fieldLine}>
+        <b>Age/Sex:</b> {age !== null ? `${age}` : ""}{age !== null && patient.sex ? " / " : ""}{(patient.sex || "").slice(0, 1)}
       </div>
 
-      <div style={{ display: "flex", gap: 34, marginTop: 15 }}>
+      <div style={{ display: "flex", gap: 10, marginTop: 7 }}>
         {[colA, colB].map((col, ci) => (
-          <div key={ci} style={{ flex: 1, fontSize: 15, lineHeight: 1.55 }}>
+          <div key={ci} style={printStylesLabA6.checklistCol}>
             {col.map((t) => (
               <div key={t}>{checkedSet.has(t) ? "☑" : "☐"} {t}</div>
             ))}
             {ci === 1 && LAB_TEST_WITH_DETAIL.map((label) => (
               <div key={label}>
-                {detailChecked(detailMap, label) ? "☑" : "☐"} {label}: <Blank minWidth={120}>{detailMap[label] || ""}</Blank>
+                {detailChecked(detailMap, label) ? "☑" : "☐"} {label}: {detailMap[label] || "_____"}
               </div>
             ))}
           </div>
         ))}
       </div>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 24 }}>
-        <div style={printStylesHalf.signatureBlock}>
-          <div style={printStylesHalf.signatureLine}>{provider}, MD</div>
-          <div style={{ fontSize: 14 }}>License No. _____________</div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+        <div style={printStylesLabA6.signatureBlock}>
+          <div style={printStylesLabA6.signatureLine}>{provider}, MD</div>
+          <div style={{ fontSize: 6.8 }}>License No. _____________</div>
         </div>
       </div>
       {lab.signedBy && (
-        <div style={{ fontSize: 13, color: "#0F5E56", marginTop: 8, textAlign: "right" }}>
-          Electronically signed by {lab.signedBy} — {fmtDateTime(lab.signedAt)}
+        <div style={{ fontSize: 6.3, color: "#0F5E56", marginTop: 4, textAlign: "right" }}>
+          Signed by {lab.signedBy} — {fmtDateTime(lab.signedAt)}
         </div>
       )}
     </div>
@@ -5316,16 +5320,22 @@ const globalCss = `
        positioned absolutely, so it isn't affected by its ancestor's height collapsing. */
     html, body { height: 0 !important; overflow: hidden !important; }
     @page { margin: 10mm; }
-    /* The certificate and lab request are designed to fit within half of an A4 sheet
-       (see printStylesHalf); the prescription targets 5x7in specifically (see printStylesRxA6
-       — this is what Firefox actually lands on in practice, since it doesn't reliably honor an
-       exact custom size like true A6 and falls back to the closest standard size in its print
-       dialog). Either hint is a suggestion, not a guarantee, which is why both layouts stay
-       sized to look right whichever way they end up printing. */
+    /* The certificate is designed to fit within half of an A4 sheet (see printStylesHalf).
+       The lab request targets true A6 portrait specifically (see printStylesLabA6), matching
+       the clinic's existing quarter-A4 paper stock. The prescription targets 5x7in specifically
+       (see printStylesRxA6) rather than true A6, because that's what Firefox actually lands on
+       in practice for it — it doesn't reliably honor an exact custom size and falls back to the
+       closest standard size already selected in its print dialog, so if A6 isn't offered as a
+       standard option for the lab request either, the same kind of substitution (picking
+       whatever's closest, then telling me what it was) is the way to resolve that. Either hint
+       is a suggestion, not a guarantee, which is why every layout stays sized to look right
+       whichever way it ends up printing. */
     @page half-sheet { size: A4 landscape; margin: 4mm; }
     @page rx-a6 { size: 5in 7in; margin: 3mm; }
-    #cert-print-area, #lab-print-area { page: half-sheet; }
+    @page lab-a6 { size: 105mm 148.5mm; margin: 3mm; }
+    #cert-print-area { page: half-sheet; }
     #rx-print-area { page: rx-a6; }
+    #lab-print-area { page: lab-a6; }
   }
 `;
 
@@ -5402,6 +5412,27 @@ function getRxDensityTier(medCount) {
   if (medCount <= 6) return { rxMark: 19, tableFont: 9.5, medNameFont: 14.5, thFont: 8.75, cellPad: "3px 3px", indicationFont: 8 };
   return { rxMark: 17, tableFont: 8.5, medNameFont: 13, thFont: 8, cellPad: "2.2px 2.5px", indicationFont: 7.5 };
 }
+
+// Print styles specifically for the lab/diagnostic request, sized for true A6 (105mm x
+// 148.5mm) portrait — one quarter of an A4 sheet, matching the clinic's existing
+// pre-printed paper stock. This is a fixed, single size rather than a density-tier system
+// like the prescription's: the checklist is always the same fixed set of tests, not a
+// variable number of medications, so one carefully-sized layout covers every print.
+// Certificates keep using the separate printStylesHalf below and are unaffected by this.
+const printStylesLabA6 = {
+  page: { fontFamily: "Arial, Helvetica, sans-serif", color: "#111", padding: "4mm 4.5mm", width: "96mm", boxSizing: "border-box" },
+  headerRow: { display: "flex", alignItems: "center", borderBottom: "1.5px solid #0F5E56", paddingBottom: 4, marginBottom: 5 },
+  logoCircle: { width: 26, height: 26, borderRadius: "50%", border: "1.5px solid #0F5E56", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  headerSpacer: { width: 26, flexShrink: 0 },
+  headerTextCol: { flex: 1, textAlign: "center", minWidth: 0 },
+  clinicName: { fontSize: 11.5, fontWeight: 800, color: "#0F5E56", letterSpacing: 0.1, lineHeight: 1.15 },
+  clinicSub: { fontSize: 7.3, color: "#333", lineHeight: 1.25 },
+  title: { textAlign: "center", fontSize: 9.5, fontWeight: 800, letterSpacing: 0.6, marginTop: 5, lineHeight: 1.3 },
+  fieldLine: { fontSize: 7.8, marginTop: 4 },
+  checklistCol: { flex: 1, fontSize: 7.3, lineHeight: 1.42 },
+  signatureBlock: { textAlign: "center", minWidth: 85 },
+  signatureLine: { borderTop: "1px solid #333", paddingTop: 2, fontSize: 8, fontWeight: 600 },
+};
 
 const printStylesHalf = {
   page: { fontFamily: "Arial, Helvetica, sans-serif", color: "#111", padding: "9mm 11mm", maxWidth: "198mm", boxSizing: "border-box" },
