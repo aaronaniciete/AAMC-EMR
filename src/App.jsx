@@ -1903,6 +1903,58 @@ function Schedule({ data, persist, currentUser, showToast, onOpenPatient }) {
   );
 }
 
+// A type-to-filter patient picker, used in place of a plain <select> anywhere the
+// patient list has grown too long to comfortably scroll through. Shows a short list on
+// focus (so it's still browsable without typing anything), narrows as the person types,
+// and on blur snaps the field's text back to whatever is actually selected — so if
+// someone types a search, then clicks away without picking a suggestion, the field never
+// displays something other than the real, current selection.
+function PatientPicker({ patients, value, onChange }) {
+  const selected = patients.find((p) => p.id === value);
+  const [query, setQuery] = useState(selected ? selected.name : "");
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const filtered = query.trim()
+    ? patients.filter((p) => p.name.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 8)
+    : patients.slice(0, 8);
+
+  function pickPatient(p) {
+    onChange(p.id);
+    setQuery(p.name);
+    setShowSuggestions(false);
+  }
+
+  function handleBlur() {
+    setTimeout(() => {
+      setShowSuggestions(false);
+      const current = patients.find((p) => p.id === value);
+      if (current && query !== current.name) setQuery(current.name);
+    }, 150);
+  }
+
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        style={styles.input}
+        value={query}
+        onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true); }}
+        onFocus={() => setShowSuggestions(true)}
+        onBlur={handleBlur}
+        placeholder="Type to search patients…"
+      />
+      {showSuggestions && filtered.length > 0 && (
+        <div style={styles.suggestBox}>
+          {filtered.map((p) => (
+            <div key={p.id} style={styles.suggestItem} onMouseDown={() => pickPatient(p)}>
+              {p.name}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ApptForm({ patients, defaultDate, defaultProvider, onSubmit }) {
   const [patientId, setPatientId] = useState(patients[0]?.id || "");
   const [date, setDate] = useState(defaultDate);
@@ -1917,11 +1969,7 @@ function ApptForm({ patients, defaultDate, defaultProvider, onSubmit }) {
       ) : (
         <>
           <Field label="Patient">
-            <select style={styles.input} value={patientId} onChange={(e) => setPatientId(e.target.value)}>
-              {patients.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
+            <PatientPicker patients={patients} value={patientId} onChange={setPatientId} />
           </Field>
           <div style={{ display: "flex", gap: 10 }}>
             <Field label="Date" style={{ flex: 1 }}>
