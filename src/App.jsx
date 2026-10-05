@@ -1911,7 +1911,12 @@ function Schedule({ data, persist, currentUser, showToast, onOpenPatient }) {
 // displays something other than the real, current selection.
 function PatientPicker({ patients, value, onChange }) {
   const selected = patients.find((p) => p.id === value);
-  const [query, setQuery] = useState(selected ? selected.name : "");
+  // Deliberately NOT pre-filled with the current selection's name: if it were, the
+  // filter below would immediately narrow to just that one match the moment the field
+  // is focused, before anyone's typed anything — which is exactly the bug this
+  // replaces. Instead the current selection shows as a placeholder, and the field
+  // itself stays empty and ready for a fresh search until something is actually typed.
+  const [query, setQuery] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
 
   const filtered = query.trim()
@@ -1920,15 +1925,14 @@ function PatientPicker({ patients, value, onChange }) {
 
   function pickPatient(p) {
     onChange(p.id);
-    setQuery(p.name);
+    setQuery("");
     setShowSuggestions(false);
   }
 
   function handleBlur() {
     setTimeout(() => {
       setShowSuggestions(false);
-      const current = patients.find((p) => p.id === value);
-      if (current && query !== current.name) setQuery(current.name);
+      setQuery(""); // always falls back to the placeholder, which reflects the real selection
     }, 150);
   }
 
@@ -1940,7 +1944,7 @@ function PatientPicker({ patients, value, onChange }) {
         onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true); }}
         onFocus={() => setShowSuggestions(true)}
         onBlur={handleBlur}
-        placeholder="Type to search patients…"
+        placeholder={selected ? selected.name : "Type to search patients…"}
       />
       {showSuggestions && filtered.length > 0 && (
         <div style={styles.suggestBox}>
