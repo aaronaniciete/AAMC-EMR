@@ -4303,9 +4303,15 @@ function PrintableLabRequest({ lab, patient, clinicInfo, provider }) {
   const issueDate = new Date(lab.date || Date.now());
   const checkedSet = new Set(lab.tests);
   const detailMap = Object.fromEntries((lab.details || []).map((d) => [d.label, d.detail]));
-  const half = Math.ceil(LAB_TEST_CHECKLIST.length / 2);
-  const colA = LAB_TEST_CHECKLIST.slice(0, half);
-  const colB = LAB_TEST_CHECKLIST.slice(half);
+  // One combined list split into two equal columns so rows line up across the page, and
+  // the rows are then spread evenly down the available height (see printStylesLabA6.checklistWrap).
+  const items = [
+    ...LAB_TEST_CHECKLIST.map((t) => ({ key: t, checked: checkedSet.has(t), text: t })),
+    ...LAB_TEST_WITH_DETAIL.map((label) => ({ key: label, checked: detailChecked(detailMap, label), text: `${label}: ${detailMap[label] || "_____"}` })),
+  ];
+  const half = Math.ceil(items.length / 2);
+  const colA = items.slice(0, half);
+  const colB = items.slice(half);
 
   return (
     <div style={printStylesLabA6.page}>
@@ -4333,25 +4339,20 @@ function PrintableLabRequest({ lab, patient, clinicInfo, provider }) {
         <b>Age/Sex:</b> {age !== null ? `${age}` : ""}{age !== null && patient.sex ? " / " : ""}{(patient.sex || "").slice(0, 1)}
       </div>
 
-      <div style={{ display: "flex", gap: 14, marginTop: 10 }}>
+      <div style={printStylesLabA6.checklistWrap}>
         {[colA, colB].map((col, ci) => (
           <div key={ci} style={printStylesLabA6.checklistCol}>
-            {col.map((t) => (
-              <div key={t}>{checkedSet.has(t) ? "☑" : "☐"} {t}</div>
-            ))}
-            {ci === 1 && LAB_TEST_WITH_DETAIL.map((label) => (
-              <div key={label}>
-                {detailChecked(detailMap, label) ? "☑" : "☐"} {label}: {detailMap[label] || "_____"}
-              </div>
+            {col.map((it) => (
+              <div key={it.key} style={printStylesLabA6.checkRow}>{it.checked ? "☑" : "☐"} {it.text}</div>
             ))}
           </div>
         ))}
       </div>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
         <div style={printStylesLabA6.signatureBlock}>
           <div style={printStylesLabA6.signatureLine}>{provider}, MD</div>
-          <div style={{ fontSize: 9 }}>License No. _____________</div>
+          <div style={{ fontSize: 10.5 }}>License No. _____________</div>
         </div>
       </div>
       {lab.signedBy && (
@@ -5332,7 +5333,7 @@ const globalCss = `
        whichever way it ends up printing. */
     @page half-sheet { size: A4 landscape; margin: 4mm; }
     @page rx-a6 { size: 5in 7in; margin: 3mm; }
-    @page lab-a6 { size: 105mm 148.5mm; margin: 3mm; }
+    @page lab-a6 { size: 4in 6in; margin: 3mm; }
     #cert-print-area { page: half-sheet; }
     #rx-print-area { page: rx-a6; }
     #lab-print-area { page: lab-a6; }
@@ -5420,22 +5421,24 @@ function getRxDensityTier(medCount) {
 // variable number of medications, so one carefully-sized layout covers every print.
 // Certificates keep using the separate printStylesHalf below and are unaffected by this.
 const printStylesLabA6 = {
-  page: { fontFamily: "Arial, Helvetica, sans-serif", color: "#111", padding: "5mm 5.5mm", width: "96mm", boxSizing: "border-box" },
-  headerRow: { display: "flex", alignItems: "center", borderBottom: "2px solid #0F5E56", paddingBottom: 5, marginBottom: 7 },
-  logoCircle: { width: 34, height: 34, borderRadius: "50%", border: "2px solid #0F5E56", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  headerSpacer: { width: 34, flexShrink: 0 },
+  // 4x6in portrait (101.6 x 152.4mm) minus the 3mm page margin on every side. Height (141mm) is set under the A6 printable height (142.5mm), the shorter of the two sizes the clinic uses, so it fits 4x6 and A6 alike. It is a
+  // hair under the printable height so it can never spill onto a second sheet; the checklist
+  // takes whatever height is left (flex: 1) and spreads its rows evenly through it, so the page
+  // is filled from header to signature.
+  page: { fontFamily: "Arial, Helvetica, sans-serif", color: "#111", padding: "1mm 1.5mm", width: "95mm", height: "141mm", boxSizing: "border-box", display: "flex", flexDirection: "column", overflow: "hidden" },
+  headerRow: { display: "flex", alignItems: "center", borderBottom: "2px solid #0F5E56", paddingBottom: 6, marginBottom: 8 },
+  logoCircle: { width: 40, height: 40, borderRadius: "50%", border: "2px solid #0F5E56", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  headerSpacer: { width: 40, flexShrink: 0 },
   headerTextCol: { flex: 1, textAlign: "center", minWidth: 0 },
-  clinicName: { fontSize: 15, fontWeight: 800, color: "#0F5E56", letterSpacing: 0.1, lineHeight: 1.15 },
-  clinicSub: { fontSize: 9.5, color: "#333", lineHeight: 1.25 },
-  title: { textAlign: "center", fontSize: 13, fontWeight: 800, letterSpacing: 0.6, marginTop: 7, lineHeight: 1.3 },
-  fieldLine: { fontSize: 10.5, marginTop: 6 },
-  // Deliberately scaled up less than everything else: this is the one part of the page
-  // with no slack — all 37 tests must fit in the taller column regardless of how much
-  // blank space the rest of the page has to spare, so it stays closer to its original,
-  // tested-to-fit size while the rest of the page grows to use the space.
-  checklistCol: { flex: 1, fontSize: 8.3, lineHeight: 1.4 },
-  signatureBlock: { textAlign: "center", minWidth: 100 },
-  signatureLine: { borderTop: "1.5px solid #333", paddingTop: 3, fontSize: 10.5, fontWeight: 600 },
+  clinicName: { fontSize: 16.5, fontWeight: 800, color: "#0F5E56", letterSpacing: 0.1, lineHeight: 1.15 },
+  clinicSub: { fontSize: 10.5, color: "#333", lineHeight: 1.25 },
+  title: { textAlign: "center", fontSize: 14, fontWeight: 800, letterSpacing: 0.5, marginTop: 4, lineHeight: 1.3 },
+  fieldLine: { fontSize: 12, marginTop: 7 },
+  checklistWrap: { display: "flex", gap: 10, marginTop: 10, flex: 1, minHeight: 0 },
+  checklistCol: { flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-between", fontSize: 11.5, lineHeight: 1.2, minWidth: 0 },
+  checkRow: { whiteSpace: "nowrap" },
+  signatureBlock: { textAlign: "center", minWidth: 120 },
+  signatureLine: { borderTop: "1.5px solid #333", paddingTop: 3, fontSize: 12, fontWeight: 600 },
 };
 
 const printStylesHalf = {
