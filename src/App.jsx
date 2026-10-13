@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   CalendarDays, Users, Stethoscope, Pill, Home, Search, Plus, X,
   Baby, UserRound, AlertTriangle, ChevronLeft, Clock, FileText,
-  LogOut, Trash2, Check, ClipboardList, Pencil, Layers, Lock, Inbox, Download
+  LogOut, Trash2, Check, ClipboardList, Pencil, Layers, Lock, Inbox, Download, Wallet
 } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
 
@@ -29,6 +29,8 @@ const emptyData = () => ({
   certificates: [],
   physicalExams: [],
   labRequests: [],
+  payments: [],
+  dailyClosings: [],
   auditLog: [],
 });
 
@@ -1249,6 +1251,14 @@ export default function ClinicEMR() {
               }}
             />
           )}
+          {view === "payments" && (
+            <PaymentsPage
+              data={data}
+              persist={persist}
+              currentUser={currentUser}
+              showToast={showToast}
+            />
+          )}
           {view === "registrations" && (
             <RegistrationsPage
               registrations={pendingRegistrations}
@@ -1547,6 +1557,7 @@ function Sidebar({ view, setView, currentUser, onSignOut, showToast, pendingCoun
     { key: "dashboard", label: "Dashboard", icon: Home },
     { key: "schedule", label: "Schedule", icon: CalendarDays },
     { key: "patients", label: "Patients", icon: Users },
+    { key: "payments", label: "Payments", icon: Wallet },
     { key: "registrations", label: "Registrations", icon: Inbox, badge: pendingCount },
     { key: "medications", label: "Medications", icon: Pill },
     { key: "templates", label: "Rx Templates", icon: Layers },
@@ -5079,6 +5090,421 @@ function StaffDirectory({ staffList, showToast, clinicInfo, persistClinicInfo, s
 }
 
 /* ---------------- Shared bits ---------------- */
+/* ---------------- Payments & Daily Log ---------------- */
+// Replaces the handwritten daily logbook. One row per patient visit: consult fee, the
+// medical-certificate (MC) and urinalysis (UA) add-ons, and medications, each tagged with how
+// it was paid. The end-of-day summary reproduces the logbook's total page automatically:
+// totals collected, GCash vs cash, the day's payouts, face-mask sales, and the cash to turn over.
+const PAY_METHODS = [
+  { key: "cash", label: "Cash" },
+  { key: "gcash", label: "GCash" },
+  { key: "advance", label: "Advance (paid earlier)" },
+];
+const MC_OPTIONS = [0, 50, 150];
+const UA_FEE = 50;
+const PAYOUT_SLOTS = [
+  { id: "p1", label: "Secretary 1" },
+  { id: "p2", label: "Secretary 2" },
+  { id: "p3", label: "Doctor (MD)" },
+];
+
+function todayLocalISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function peso(n) {
+  const v = Number(n) || 0;
+  return v.toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+function methodLabel(key) {
+  return (PAY_METHODS.find((m) => m.key === key) || PAY_METHODS[0]).label.split(" ")[0];
+}
+// Everything charged under the consult column in the logbook: consult fee + MC + UA.
+function servicesTotal(p) {
+  return (Number(p.consultAmt) || 0) + (Number(p.mc) || 0) + (Number(p.ua) || 0);
+}
+function rowTotal(p) {
+  return servicesTotal(p) + (Number(p.medsAmt) || 0);
+}
+
+// Totals for one day's rows + that day's closing entries — the same arithmetic as the
+// logbook's total page. GCash and advance payments are both "not cash in the drawer today".
+function summarizeDay(rows, closing) {
+  let consultCash = 0, consultGcash = 0, medsCash = 0, medsGcash = 0;
+  for (const p of rows) {
+    const svc = servicesTotal(p);
+    const meds = Number(p.medsAmt) || 0;
+    if ((p.svcMethod || "cash") === "cash") consultCash += svc; else consultGcash += svc;
+    if ((p.medsMethod || "cash") === "cash") medsCash += meds; else medsGcash += meds;
+  }
+  const masks = Number(closing?.masksAmt) || 0;
+  const payouts = PAYOUT_SLOTS.map((slot) => {
+    const found = (closing?.payouts || []).find((x) => x.id === slot.id);
+    return { id: slot.id, label: slot.label, name: found?.name || "", amount: Number(found?.amount) || 0 };
+  });
+  const payoutTotal = payouts.reduce((s, x) => s + x.amount, 0);
+  const totalCollected = consultCash + consultGcash + medsCash + medsGcash;
+  const gcashTotal = consultGcash + medsGcash;
+  const cashReceived = consultCash + medsCash;
+  return {
+    consultCash, consultGcash, medsCash, medsGcash, masks, payouts, payoutTotal,
+    totalCollected, gcashTotal, cashReceived,
+    medsTotal: medsCash + medsGcash,
+    turnOver: cashReceived - payoutTotal + masks,
+  };
+}
+
+function csvCell(v) {
+  const s = String(v ?? "");
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function PaymentsPage({ data, persist, currentUser, showToast }) {
+  const [date, setDate] = useState(todayLocalISO);
+  const [editing, setEditing] = useState(null); // null | "new" | payment record
+  const [newPatientId, setNewPatientId] = useState("");
+  const [showClose, setShowClose] = useState(false);
+  const [exportFrom, setExportFrom] = useState(() => todayLocalISO().slice(0, 8) + "01");
+  const [exportTo, setExportTo] = useState(todayLocalISO);
+
+  const payments = data.payments || [];
+  const closings = data.dailyClosings || [];
+  const rows = payments.filter((p) => p.date === date).sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+  const closing = closings.find((c) => c.date === date);
+  const sum = summarizeDay(rows, closing);
+  const patientName = (p) => (data.patients.find((x) => x.id === p.patientId)?.name) || p.patientName || "Unknown patient";
+
+  // Patients scheduled for this date who don't have a payment row yet — one click to log them.
+  const loggedIds = new Set(rows.map((r) => r.patientId));
+  const scheduledNotLogged = (data.appointments || [])
+    .filter((a) => a.date === date && !loggedIds.has(a.patientId))
+    .sort((a, b) => a.time.localeCompare(b.time));
+
+  async function savePayment(record) {
+    const patient = data.patients.find((x) => x.id === record.patientId);
+    const full = { ...record, patientName: patient ? patient.name : record.patientName || "" };
+    let next;
+    if (full.id) {
+      next = { ...data, payments: payments.map((p) => (p.id === full.id ? { ...p, ...full, editedBy: currentUser.name, editedAt: new Date().toISOString() } : p)) };
+    } else {
+      next = { ...data, payments: [...payments, { ...full, id: uid("pay"), date, createdBy: currentUser.name, createdAt: new Date().toISOString() }] };
+    }
+    await persist(next);
+    showToast("Payment saved");
+    setEditing(null);
+  }
+
+  async function deletePayment(id) {
+    if (!window.confirm("Remove this payment row?")) return;
+    await persist({ ...data, payments: payments.filter((p) => p.id !== id) });
+    showToast("Payment row removed");
+  }
+
+  async function saveClosing(entry) {
+    const record = { id: `close-${date}`, date, masksAmt: entry.masksAmt, payouts: entry.payouts, updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
+    const exists = closings.some((c) => c.id === record.id);
+    await persist({ ...data, dailyClosings: exists ? closings.map((c) => (c.id === record.id ? record : c)) : [...closings, record] });
+    showToast("Day-end entries saved");
+    setShowClose(false);
+  }
+
+  function exportCsv() {
+    const inRange = payments.filter((p) => p.date >= exportFrom && p.date <= exportTo).sort((a, b) => a.date.localeCompare(b.date) || (a.createdAt || "").localeCompare(b.createdAt || ""));
+    const head = ["Date", "Patient", "Consult fee", "MC", "UA", "Consult & services total", "Paid via", "Medications", "Meds paid via", "Row total", "Entered by"];
+    const lines = [head.map(csvCell).join(",")];
+    for (const p of inRange) {
+      lines.push([p.date, patientName(p), p.consultAmt || 0, p.mc || 0, p.ua || 0, servicesTotal(p), methodLabel(p.svcMethod), p.medsAmt || 0, methodLabel(p.medsMethod), rowTotal(p), p.createdBy || ""].map(csvCell).join(","));
+    }
+    lines.push("");
+    lines.push(["Daily summary"].map(csvCell).join(","));
+    lines.push(["Date", "Total collected", "Cash received", "GCash / advance", "Payouts", "Face masks", "Cash to turn over"].map(csvCell).join(","));
+    const days = Array.from(new Set(inRange.map((p) => p.date))).sort();
+    for (const d of days) {
+      const s = summarizeDay(inRange.filter((p) => p.date === d), closings.find((c) => c.date === d));
+      lines.push([d, s.totalCollected, s.cashReceived, s.gcashTotal, s.payoutTotal, s.masks, s.turnOver].map(csvCell).join(","));
+    }
+    const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `payments-${exportFrom}-to-${exportTo}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  const th = { textAlign: "left", fontSize: 10.5, color: "#5B6B68", textTransform: "uppercase", letterSpacing: 0.3, padding: "7px 6px", borderBottom: "1.5px solid #DCE3E1", fontWeight: 700 };
+  const td = { padding: "9px 6px", borderBottom: "1px solid #EDF1F0", fontSize: 13, verticalAlign: "middle" };
+  const num = { textAlign: "right", fontFamily: "IBM Plex Mono, monospace" };
+  const tag = (m) => ({
+    display: "inline-block", fontSize: 9.5, fontWeight: 700, padding: "1px 6px", borderRadius: 5, marginLeft: 6, verticalAlign: 1, textTransform: "uppercase",
+    background: m === "cash" ? "#EAF3F1" : m === "gcash" ? "#E3F1FB" : "#FBF1DF",
+    color: m === "cash" ? "#0F5E56" : m === "gcash" ? "#1A5FA8" : "#6B4A1F",
+  });
+  const sumRow = { display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid #EDF1F0", fontSize: 13.5 };
+
+  return (
+    <div>
+      <div style={styles.pageHeader}>
+        <h2 style={styles.h2}>Payments &amp; Daily Log</h2>
+        <button style={styles.primaryBtn} onClick={() => { setNewPatientId(""); setEditing("new"); }}>
+          <Plus size={15} /> Add patient payment
+        </button>
+      </div>
+
+      <div style={{ marginBottom: 14 }}>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ ...styles.input, width: 200 }} />
+      </div>
+
+      {scheduledNotLogged.length > 0 && (
+        <div style={{ ...styles.card, padding: 14 }}>
+          <div style={{ fontSize: 12, color: "#5B6B68", fontWeight: 600, marginBottom: 8 }}>
+            Scheduled today, not yet logged — tap to add payment
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {scheduledNotLogged.map((a) => {
+              const p = data.patients.find((x) => x.id === a.patientId);
+              return (
+                <button key={a.id} style={styles.pillToggle} onClick={() => { setNewPatientId(a.patientId); setEditing("new"); }}>
+                  {a.time} · {p ? p.name : "Unknown patient"}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <SectionCard title={`Patients — ${fmtDate(date)}`}>
+        {rows.length === 0 ? (
+          <EmptyState text="No payments logged for this date yet." />
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th style={th}>#</th>
+                  <th style={th}>Patient</th>
+                  <th style={th}>Add-ons</th>
+                  <th style={{ ...th, textAlign: "right" }}>Consult</th>
+                  <th style={{ ...th, textAlign: "right" }}>MC / UA</th>
+                  <th style={{ ...th, textAlign: "right" }}>Medications</th>
+                  <th style={{ ...th, textAlign: "right" }}>Row total</th>
+                  <th style={th}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((p, i) => (
+                  <tr key={p.id}>
+                    <td style={td}>{i + 1}</td>
+                    <td style={{ ...td, fontWeight: 600 }}>{patientName(p)}</td>
+                    <td style={td}>
+                      {!p.mc && !p.ua && <span style={{ color: "#B5BFBD", fontSize: 12 }}>none</span>}
+                      {!!p.mc && <span style={{ ...styles.pill, background: "#E8EEF9", color: "#2B4A8B", marginRight: 4 }}>MC ₱{p.mc}</span>}
+                      {!!p.ua && <span style={{ ...styles.pill, background: "#FBF1DF", color: "#6B4A1F" }}>UA ₱{p.ua}</span>}
+                    </td>
+                    <td style={{ ...td, ...num }}>
+                      {p.consultAmt ? peso(p.consultAmt) : "—"}
+                      {servicesTotal(p) > 0 && <span style={tag(p.svcMethod || "cash")}>{methodLabel(p.svcMethod)}</span>}
+                    </td>
+                    <td style={{ ...td, ...num }}>{(Number(p.mc) || 0) + (Number(p.ua) || 0) ? peso((Number(p.mc) || 0) + (Number(p.ua) || 0)) : "—"}</td>
+                    <td style={{ ...td, ...num }}>
+                      {p.medsAmt ? peso(p.medsAmt) : "—"}
+                      {!!p.medsAmt && <span style={tag(p.medsMethod || "cash")}>{methodLabel(p.medsMethod)}</span>}
+                    </td>
+                    <td style={{ ...td, ...num, fontWeight: 700 }}>{peso(rowTotal(p))}</td>
+                    <td style={{ ...td, whiteSpace: "nowrap", textAlign: "right" }}>
+                      <button style={styles.iconBtn} onClick={() => setEditing(p)} aria-label="Edit"><Pencil size={14} /></button>
+                      <button style={styles.iconBtn} onClick={() => deletePayment(p.id)} aria-label="Delete"><Trash2 size={14} /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
+
+      <SectionCard
+        title={`End-of-day summary — ${fmtDate(date)}`}
+        action={<button style={styles.primaryBtn} onClick={() => setShowClose(true)}><Pencil size={14} /> Payouts &amp; face masks</button>}
+      >
+        <div style={{ display: "flex", gap: 28, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 260 }}>
+            <div style={{ ...styles.label, margin: "2px 0" }}>Collected</div>
+            <div style={sumRow}><span>Consult &amp; services (cash)</span><b style={styles.mono}>{peso(sum.consultCash)}</b></div>
+            <div style={sumRow}><span>Consult &amp; services (GCash / advance)</span><b style={styles.mono}>{peso(sum.consultGcash)}</b></div>
+            <div style={sumRow}><span>Medications</span><b style={styles.mono}>{peso(sum.medsTotal)}</b></div>
+            <div style={{ ...sumRow, fontWeight: 700, borderBottom: "2px solid #12312D" }}><span>Total collected</span><b style={styles.mono}>{peso(sum.totalCollected)}</b></div>
+            <div style={{ ...styles.label, margin: "14px 0 2px" }}>By payment type</div>
+            <div style={sumRow}><span>GCash / advance — consult</span><b style={styles.mono}>{peso(sum.consultGcash)}</b></div>
+            <div style={sumRow}><span>GCash / advance — medications</span><b style={styles.mono}>{peso(sum.medsGcash)}</b></div>
+            <div style={{ ...sumRow, fontWeight: 700, borderBottom: "2px solid #12312D" }}><span>Total GCash / advance</span><b style={styles.mono}>{peso(sum.gcashTotal)}</b></div>
+          </div>
+          <div style={{ flex: 1, minWidth: 260 }}>
+            <div style={{ ...styles.label, margin: "2px 0" }}>Cash on hand</div>
+            <div style={sumRow}><span>Total collected</span><b style={styles.mono}>{peso(sum.totalCollected)}</b></div>
+            <div style={sumRow}><span>− GCash / advance</span><b style={{ ...styles.mono, color: "#B23B3B" }}>{peso(sum.gcashTotal)}</b></div>
+            <div style={{ ...sumRow, fontWeight: 700, borderBottom: "2px solid #12312D" }}><span>Cash received</span><b style={styles.mono}>{peso(sum.cashReceived)}</b></div>
+            <div style={{ ...styles.label, margin: "14px 0 2px" }}>Payouts</div>
+            {sum.payouts.map((x) => (
+              <div key={x.id} style={sumRow}>
+                <span>{x.label}{x.name ? ` — ${x.name}` : ""}</span>
+                <b style={{ ...styles.mono, color: "#B23B3B" }}>{peso(x.amount)}</b>
+              </div>
+            ))}
+            <div style={sumRow}><span>Face masks sold (₱5 each)</span><b style={styles.mono}>+{peso(sum.masks)}</b></div>
+            <div style={{ display: "flex", justifyContent: "space-between", background: "#0F2925", color: "#fff", borderRadius: 10, padding: "12px 14px", marginTop: 10, fontSize: 15, fontWeight: 700 }}>
+              <span>Cash to turn over</span><span style={{ fontFamily: "IBM Plex Mono, monospace" }}>₱ {peso(sum.turnOver)}</span>
+            </div>
+          </div>
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Export for accounting">
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <Field label="From"><input type="date" style={{ ...styles.input, width: 170 }} value={exportFrom} onChange={(e) => setExportFrom(e.target.value)} /></Field>
+          <Field label="To"><input type="date" style={{ ...styles.input, width: 170 }} value={exportTo} onChange={(e) => setExportTo(e.target.value)} /></Field>
+          <button style={styles.primaryBtn} onClick={exportCsv}><Download size={14} /> Download (opens in Excel)</button>
+        </div>
+      </SectionCard>
+
+      {editing && (
+        <Modal onClose={() => setEditing(null)} title={editing === "new" ? "Add patient payment" : "Edit payment"}>
+          <PaymentForm
+            patients={data.patients}
+            initial={editing === "new" ? { patientId: newPatientId } : editing}
+            onSubmit={savePayment}
+          />
+        </Modal>
+      )}
+      {showClose && (
+        <Modal onClose={() => setShowClose(false)} title={`Payouts & face masks — ${fmtDate(date)}`}>
+          <ClosingForm initial={closing} onSubmit={saveClosing} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function PaymentForm({ patients, initial, onSubmit }) {
+  const [patientId, setPatientId] = useState(initial.patientId || "");
+  const [consultAmt, setConsultAmt] = useState(initial.consultAmt ?? "");
+  const [mc, setMc] = useState(Number(initial.mc) || 0);
+  const [ua, setUa] = useState(!!initial.ua);
+  const [svcMethod, setSvcMethod] = useState(initial.svcMethod || "cash");
+  const [medsAmt, setMedsAmt] = useState(initial.medsAmt ?? "");
+  const [medsMethod, setMedsMethod] = useState(initial.medsMethod || "cash");
+
+  const consultNum = Number(consultAmt) || 0;
+  const medsNum = Number(medsAmt) || 0;
+  const total = consultNum + mc + (ua ? UA_FEE : 0) + medsNum;
+  const canSave = !!patientId && total > 0;
+
+  const methodPicker = (value, setValue) => (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      {PAY_METHODS.map((m) => (
+        <button key={m.key} type="button" onClick={() => setValue(m.key)} style={{ ...styles.pillToggle, ...(value === m.key ? styles.pillToggleActive : {}) }}>
+          {m.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <Field label="Patient">
+        <PatientPicker patients={patients} value={patientId} onChange={setPatientId} />
+      </Field>
+
+      <Field label="Consult fee (₱)">
+        <input type="number" min="0" inputMode="decimal" style={styles.input} value={consultAmt} onChange={(e) => setConsultAmt(e.target.value)} placeholder="e.g. 350" />
+      </Field>
+
+      <Field label="Add-ons (charged with the consult)">
+        <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <span style={{ fontSize: 12.5, color: "#5B6B68" }}>MC</span>
+            {MC_OPTIONS.map((v) => (
+              <button key={v} type="button" onClick={() => setMc(v)} style={{ ...styles.pillToggle, ...(mc === v ? styles.pillToggleActive : {}) }}>
+                {v === 0 ? "None" : `₱${v}`}
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={() => setUa(!ua)} style={{ ...styles.pillToggle, ...(ua ? styles.pillToggleActive : {}) }}>
+            UA ₱{UA_FEE}
+          </button>
+        </div>
+      </Field>
+
+      <Field label="Consult & add-ons paid via">{methodPicker(svcMethod, setSvcMethod)}</Field>
+
+      <Field label="Medications bought (₱)">
+        <input type="number" min="0" inputMode="decimal" style={styles.input} value={medsAmt} onChange={(e) => setMedsAmt(e.target.value)} placeholder="e.g. 638 — leave blank if none" />
+      </Field>
+      {medsNum > 0 && <Field label="Medications paid via">{methodPicker(medsMethod, setMedsMethod)}</Field>}
+
+      <div style={{ display: "flex", justifyContent: "space-between", background: "#EAF3F1", borderRadius: 9, padding: "10px 12px", fontSize: 14, fontWeight: 700, color: "#12312D" }}>
+        <span>Row total</span><span style={{ fontFamily: "IBM Plex Mono, monospace" }}>₱ {peso(total)}</span>
+      </div>
+
+      <button
+        style={{ ...styles.primaryBtn, justifyContent: "center", opacity: canSave ? 1 : 0.5 }}
+        disabled={!canSave}
+        onClick={() => onSubmit({
+          ...(initial.id ? { id: initial.id } : {}),
+          patientId, consultAmt: consultNum, mc, ua: ua ? UA_FEE : 0, svcMethod,
+          medsAmt: medsNum, medsMethod,
+        })}
+      >
+        <Check size={15} /> Save
+      </button>
+      {!canSave && <div style={{ fontSize: 12, color: "#8A9793" }}>Pick a patient and enter at least one amount.</div>}
+    </div>
+  );
+}
+
+function ClosingForm({ initial, onSubmit }) {
+  const [masksAmt, setMasksAmt] = useState(initial?.masksAmt ?? "");
+  const [payouts, setPayouts] = useState(() =>
+    PAYOUT_SLOTS.map((slot) => {
+      const found = (initial?.payouts || []).find((x) => x.id === slot.id);
+      return { id: slot.id, label: slot.label, name: found?.name || "", amount: found?.amount ?? "" };
+    })
+  );
+  const setP = (id, key, value) => setPayouts((cur) => cur.map((x) => (x.id === id ? { ...x, [key]: value } : x)));
+  const masksNum = Number(masksAmt) || 0;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ fontSize: 12.5, color: "#5B6B68" }}>Entered fresh each day. These come out of the cash received.</div>
+      {payouts.map((x) => (
+        <div key={x.id} style={{ display: "flex", gap: 8 }}>
+          <Field label={x.label} style={{ flex: 1.4 }}>
+            <input style={styles.input} value={x.name} onChange={(e) => setP(x.id, "name", e.target.value)} placeholder="Name" />
+          </Field>
+          <Field label="Amount (₱)" style={{ flex: 1 }}>
+            <input type="number" min="0" inputMode="decimal" style={styles.input} value={x.amount} onChange={(e) => setP(x.id, "amount", e.target.value)} />
+          </Field>
+        </div>
+      ))}
+      <Field label="Face masks sold today (₱) — ₱5 per mask">
+        <input type="number" min="0" inputMode="decimal" style={styles.input} value={masksAmt} onChange={(e) => setMasksAmt(e.target.value)} placeholder="e.g. 210" />
+        {masksNum > 0 && <div style={{ fontSize: 11.5, color: "#8A9793" }}>≈ {Math.round(masksNum / 5)} masks</div>}
+      </Field>
+      <button
+        style={{ ...styles.primaryBtn, justifyContent: "center" }}
+        onClick={() => onSubmit({
+          masksAmt: masksNum,
+          payouts: payouts.map((x) => ({ id: x.id, label: x.label, name: x.name.trim(), amount: Number(x.amount) || 0 })),
+        })}
+      >
+        <Check size={15} /> Save
+      </button>
+    </div>
+  );
+}
+
 function Field({ label, children, style }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4, ...style }}>
