@@ -696,6 +696,27 @@ function canSignDocuments(role) {
   return SIGNING_ROLES.includes(role);
 }
 
+// Licence numbers printed under each physician's name on prescriptions, lab/diagnostic
+// requests and medical certificates. Matched on the surname inside the provider's saved name.
+const PHYSICIAN_LICENSES = [
+  { match: /\bmendoza\b/i, license: "150908" },
+  { match: /\btabi\b/i, license: "0159606" },
+  { match: /\bsubido\b/i, license: "170146" },
+  { match: /\balba\b/i, license: "0137021" },
+];
+function licenseFor(providerName) {
+  const hit = PHYSICIAN_LICENSES.find((p) => p.match.test(providerName || ""));
+  return hit ? hit.license : "";
+}
+
+// Payments are for the front desk and Dr. Alba's account only. These three physicians don't see
+// the Payments page, and the payment icons on their schedule rows are hidden too (their
+// prescription icon stays). This hides the screens; it is not a database-level restriction.
+const PAYMENTS_HIDDEN_FROM = /\b(tabi|mendoza|subido)\b/i;
+function canViewPayments(user) {
+  return !PAYMENTS_HIDDEN_FROM.test((user && user.name) || "");
+}
+
 function dosesPerDayFor(everyHours) {
   return everyHours ? Math.max(1, Math.round(24 / everyHours)) : null;
 }
@@ -1260,7 +1281,7 @@ export default function ClinicEMR() {
               }}
             />
           )}
-          {view === "payments" && (
+          {view === "payments" && canViewPayments(currentUser) && (
             <PaymentsPage
               data={data}
               persist={persist}
@@ -1566,7 +1587,7 @@ function Sidebar({ view, setView, currentUser, onSignOut, showToast, pendingCoun
     { key: "dashboard", label: "Dashboard", icon: Home },
     { key: "schedule", label: "Schedule", icon: CalendarDays },
     { key: "patients", label: "Patients", icon: Users },
-    { key: "payments", label: "Payments", icon: Wallet },
+    ...(canViewPayments(currentUser) ? [{ key: "payments", label: "Payments", icon: Wallet }] : []),
     { key: "registrations", label: "Registrations", icon: Inbox, badge: pendingCount },
     { key: "medications", label: "Medications", icon: Pill },
     { key: "templates", label: "Rx Templates", icon: Layers },
@@ -1871,10 +1892,10 @@ function StatusGlyph({ kind }) {
     </svg>
   );
 }
-function StatusIcons({ flags }) {
+function StatusIcons({ flags, showPayments = true }) {
   return (
     <span style={{ display: "inline-flex", gap: 5, marginRight: 6 }}>
-      {STATUS_ICONS.map((ic) => {
+      {STATUS_ICONS.filter((ic) => showPayments || ic.key === "rx").map((ic) => {
         const on = !!flags[ic.key];
         return (
           <span
@@ -1894,7 +1915,8 @@ function StatusIcons({ flags }) {
   );
 }
 function statusFlagsFor(appt, data) {
-  const pay = (data.payments || []).filter((p) => p.patientId === appt.patientId && p.date === appt.date);
+  // Counts a payment taken that day OR one taken in advance for this visit date.
+  const pay = (data.payments || []).filter((p) => p.patientId === appt.patientId && (p.date === appt.date || (p.advance && p.advanceFor === appt.date)));
   const hasRx = (data.prescriptions || []).some((r) => r.patientId === appt.patientId && localDateOfISO(r.date) === appt.date);
   return {
     rx: hasRx,
@@ -1908,7 +1930,8 @@ function statusFlagsFor(appt, data) {
 /* ---------------- Schedule ---------------- */
 function Schedule({ data, persist, currentUser, showToast, onOpenPatient }) {
   const [showForm, setShowForm] = useState(false);
-  const [dateFilter, setDateFilter] = useState(() => new Date().toISOString().slice(0, 10));
+  // Local date, not UTC: toISOString() is UTC, which in Manila is still "yesterday" until 8 AM.
+  const [dateFilter, setDateFilter] = useState(todayLocalISO);
 
   const dayAppts = data.appointments
     .filter((a) => a.date === dateFilter)
@@ -1957,7 +1980,7 @@ function Schedule({ data, persist, currentUser, showToast, onOpenPatient }) {
                   <span style={{ flex: 1, cursor: "pointer" }} onClick={() => p && onOpenPatient(p.id)}>
                     {p ? p.name : "Unknown patient"}
                   </span>
-                  <StatusIcons flags={statusFlagsFor(a, data)} />
+                  <StatusIcons flags={statusFlagsFor(a, data)} showPayments={canViewPayments(currentUser)} />
                   <span style={styles.pill}>{a.reason || "Visit"}</span>
                   <span style={{ ...styles.pill, background: "#EAF3F1", color: "#0F5E56" }}>{a.provider}</span>
                   <button style={styles.iconBtn} onClick={() => removeAppt(a.id)} aria-label="Cancel">
@@ -3354,6 +3377,7 @@ function PrintableRx({ rx, patient, clinicInfo, provider, vitals }) {
             <div style={printStylesRxA6.signatureSpace} />
             <div style={printStylesRxA6.signatureLine}>{provider}</div>
             <div style={{ fontSize: 9 }}>Medical Doctor</div>
+            <div style={{ fontSize: 9 }}>License No. {licenseFor(provider) || "__________"}</div>
           </div>
         </div>
       </div>
@@ -4065,6 +4089,7 @@ function PrintableMedCert({ cert, patient, clinicInfo, provider }) {
         <div style={printStylesHalf.signatureBlock}>
           <div style={printStylesHalf.signatureLine}>{provider}</div>
           <div style={{ fontSize: 14 }}>Medical Doctor</div>
+          <div style={{ fontSize: 14 }}>License No. {licenseFor(provider) || "__________"}</div>
         </div>
       </div>
       {cert.signedBy && (
@@ -4433,7 +4458,7 @@ function PrintableLabRequest({ lab, patient, clinicInfo, provider }) {
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
         <div style={printStylesLabA6.signatureBlock}>
           <div style={printStylesLabA6.signatureLine}>{provider}, MD</div>
-          <div style={{ fontSize: 10.5 }}>License No. _____________</div>
+          <div style={{ fontSize: 10.5 }}>License No. {licenseFor(provider) || "_____________"}</div>
         </div>
       </div>
       {lab.signedBy && (
@@ -5161,21 +5186,30 @@ function StaffDirectory({ staffList, showToast, clinicInfo, persistClinicInfo, s
 
 /* ---------------- Shared bits ---------------- */
 /* ---------------- Payments & Daily Log ---------------- */
-// Replaces the handwritten daily logbook. One row per patient visit: consult fee, the
-// medical-certificate (MC) and urinalysis (UA) add-ons, and medications, each tagged with how
-// it was paid. The end-of-day summary reproduces the logbook's total page automatically:
-// totals collected, GCash vs cash, the day's payouts, face-mask sales, and the cash to turn over.
+// Replaces the handwritten daily logbook. One row per patient visit. Every item — consult, MC,
+// UA, ECG, vaccine, medications and face masks — carries its own Cash / GCash tag. An
+// "advance" payment is one taken ahead of a future visit: it counts in the totals of the day the
+// money was actually received, and on the visit day it shows as prepaid but is NOT counted again.
 const PAY_METHODS = [
   { key: "cash", label: "Cash" },
   { key: "gcash", label: "GCash" },
-  { key: "advance", label: "Advance (paid earlier)" },
 ];
 const MC_OPTIONS = [0, 50, 150];
 const UA_FEE = 50;
+const MASK_PRICE = 5;
 const PAYOUT_SLOTS = [
   { id: "p1", label: "Secretary 1" },
   { id: "p2", label: "Secretary 2" },
   { id: "p3", label: "Doctor (MD)" },
+];
+// The peso items on a payment row, in display order. `amt` reads the amount off a record.
+const PAY_ITEMS = [
+  { key: "consult", label: "Consult", amt: (p) => Number(p.consultAmt) || 0 },
+  { key: "mc", label: "MC", amt: (p) => Number(p.mc) || 0 },
+  { key: "ua", label: "UA", amt: (p) => Number(p.ua) || 0 },
+  { key: "ecg", label: "ECG", amt: (p) => Number(p.ecgAmt) || 0 },
+  { key: "vaccine", label: "Vaccine", amt: (p) => Number(p.vaccineAmt) || 0 },
+  { key: "meds", label: "Medications", amt: (p) => Number(p.medsAmt) || 0 },
 ];
 
 function todayLocalISO() {
@@ -5186,50 +5220,58 @@ function peso(n) {
   const v = Number(n) || 0;
   return v.toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
-function methodLabel(key) {
-  return (PAY_METHODS.find((m) => m.key === key) || PAY_METHODS[0]).label.split(" ")[0];
+// Older rows (saved before each item had its own tag) used svcMethod for consult/MC/UA and
+// medsMethod for medications; anything that isn't "cash" counted as GCash.
+function itemMethod(p, key) {
+  if (key === "meds") return p.medsMethod === "cash" || !p.medsMethod ? "cash" : "gcash";
+  const own = p[`${key}Method`] || p.svcMethod || "cash";
+  return own === "cash" ? "cash" : "gcash";
 }
-// Everything charged under the consult column in the logbook: consult fee + MC + UA.
-function servicesTotal(p) {
-  return (Number(p.consultAmt) || 0) + (Number(p.mc) || 0) + (Number(p.ua) || 0);
+function maskMethod(p) {
+  return (p.maskMethod || "cash") === "cash" ? "cash" : "gcash";
+}
+function methodLabel(key) {
+  return key === "gcash" ? "GCash" : "Cash";
 }
 function rowTotal(p) {
-  return servicesTotal(p) + (Number(p.medsAmt) || 0);
+  return PAY_ITEMS.reduce((t, it) => t + it.amt(p), 0);
 }
-// Face masks are ₱5 each. They're tracked per patient (so the schedule can show who bought
-// one) but kept OUT of the row total and "total collected", exactly like the logbook, where
-// mask sales are added on separately at the end when working out the cash to turn over.
-const MASK_PRICE = 5;
 function maskAmount(p) {
   return (Number(p.masks) || 0) * MASK_PRICE;
 }
+// A row "counts" on the day the money was received (p.date). A row taken in advance for a
+// LATER visit is a prepaid row on that visit day: displayed, but never added to its totals.
+function isPrepaidOn(p, date) {
+  return !!p.advance && p.advanceFor === date && p.date !== date;
+}
+function fmtShort(dateStr) {
+  if (!dateStr) return "";
+  return new Date(dateStr + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
 
-// Totals for one day's rows + that day's closing entries — the same arithmetic as the
-// logbook's total page. GCash and advance payments are both "not cash in the drawer today".
+// Totals for the rows PAID on one day, plus that day's closing entries. Same arithmetic as the
+// logbook's total page, now broken down per item and per payment type.
 function summarizeDay(rows, closing) {
-  let consultCash = 0, consultGcash = 0, medsCash = 0, medsGcash = 0;
+  const byItem = {};
+  for (const it of PAY_ITEMS) byItem[it.key] = { cash: 0, gcash: 0 };
+  let masksCash = 0, masksGcash = 0, advanceReceived = 0;
   for (const p of rows) {
-    const svc = servicesTotal(p);
-    const meds = Number(p.medsAmt) || 0;
-    if ((p.svcMethod || "cash") === "cash") consultCash += svc; else consultGcash += svc;
-    if ((p.medsMethod || "cash") === "cash") medsCash += meds; else medsGcash += meds;
+    for (const it of PAY_ITEMS) byItem[it.key][itemMethod(p, it.key)] += it.amt(p);
+    if (maskMethod(p) === "cash") masksCash += maskAmount(p); else masksGcash += maskAmount(p);
+    if (p.advance && p.advanceFor && p.advanceFor !== p.date) advanceReceived += rowTotal(p);
   }
-  // Mask sales = pieces logged on patient rows (×₱5) + any extra amount typed at day-end
-  // for masks sold to people who weren't logged as a patient.
-  const masks = rows.reduce((t, p) => t + maskAmount(p), 0) + (Number(closing?.masksAmt) || 0);
+  masksCash += Number(closing?.masksAmt) || 0; // extra masks typed at day-end are cash
   const payouts = PAYOUT_SLOTS.map((slot) => {
     const found = (closing?.payouts || []).find((x) => x.id === slot.id);
     return { id: slot.id, label: slot.label, name: found?.name || "", amount: Number(found?.amount) || 0 };
   });
   const payoutTotal = payouts.reduce((s, x) => s + x.amount, 0);
-  const totalCollected = consultCash + consultGcash + medsCash + medsGcash;
-  const gcashTotal = consultGcash + medsGcash;
-  const cashReceived = consultCash + medsCash;
+  let cashReceived = 0, gcashTotal = 0;
+  for (const it of PAY_ITEMS) { cashReceived += byItem[it.key].cash; gcashTotal += byItem[it.key].gcash; }
   return {
-    consultCash, consultGcash, medsCash, medsGcash, masks, payouts, payoutTotal,
-    totalCollected, gcashTotal, cashReceived,
-    medsTotal: medsCash + medsGcash,
-    turnOver: cashReceived - payoutTotal + masks,
+    byItem, masksCash, masksGcash, masks: masksCash + masksGcash, payouts, payoutTotal,
+    cashReceived, gcashTotal, totalCollected: cashReceived + gcashTotal, advanceReceived,
+    turnOver: cashReceived - payoutTotal + masksCash,
   };
 }
 
@@ -5248,13 +5290,16 @@ function PaymentsPage({ data, persist, currentUser, showToast }) {
 
   const payments = data.payments || [];
   const closings = data.dailyClosings || [];
-  const rows = payments.filter((p) => p.date === date).sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+  const byCreated = (a, b) => (a.createdAt || "").localeCompare(b.createdAt || "");
+  const paidRows = payments.filter((p) => p.date === date).sort(byCreated);
+  const prepaidRows = payments.filter((p) => isPrepaidOn(p, date)).sort(byCreated);
   const closing = closings.find((c) => c.date === date);
-  const sum = summarizeDay(rows, closing);
+  const sum = summarizeDay(paidRows, closing);
+  const prepaidTotal = prepaidRows.reduce((t, p) => t + rowTotal(p), 0);
   const patientName = (p) => (data.patients.find((x) => x.id === p.patientId)?.name) || p.patientName || "Unknown patient";
 
-  // Patients scheduled for this date who don't have a payment row yet — one click to log them.
-  const loggedIds = new Set(rows.map((r) => r.patientId));
+  // Patients scheduled for this date who have nothing logged (paid today OR prepaid) yet.
+  const loggedIds = new Set([...paidRows, ...prepaidRows].map((r) => r.patientId));
   const scheduledNotLogged = (data.appointments || [])
     .filter((a) => a.date === date && !loggedIds.has(a.patientId))
     .sort((a, b) => a.time.localeCompare(b.time));
@@ -5288,19 +5333,24 @@ function PaymentsPage({ data, persist, currentUser, showToast }) {
   }
 
   function exportCsv() {
-    const inRange = payments.filter((p) => p.date >= exportFrom && p.date <= exportTo).sort((a, b) => a.date.localeCompare(b.date) || (a.createdAt || "").localeCompare(b.createdAt || ""));
-    const head = ["Date", "Patient", "Consult fee", "MC", "UA", "Consult & services total", "Paid via", "Medications", "Meds paid via", "Row total", "Face masks (pcs)", "Face masks (₱)", "Entered by"];
+    const inRange = payments.filter((p) => p.date >= exportFrom && p.date <= exportTo).sort((a, b) => a.date.localeCompare(b.date) || byCreated(a, b));
+    const head = ["Date paid", "Patient", "Advance for visit date", "Advance note"];
+    for (const it of PAY_ITEMS) head.push(it.label, `${it.label} paid via`);
+    head.push("ECG note", "Vaccine note", "Face masks (pcs)", "Face masks (₱)", "Masks paid via", "Row total (excl. masks)", "Entered by");
     const lines = [head.map(csvCell).join(",")];
     for (const p of inRange) {
-      lines.push([p.date, patientName(p), p.consultAmt || 0, p.mc || 0, p.ua || 0, servicesTotal(p), methodLabel(p.svcMethod), p.medsAmt || 0, methodLabel(p.medsMethod), rowTotal(p), p.masks || 0, maskAmount(p), p.createdBy || ""].map(csvCell).join(","));
+      const cells = [p.date, patientName(p), p.advance ? p.advanceFor || "" : "", p.advance ? p.advanceNote || "" : ""];
+      for (const it of PAY_ITEMS) cells.push(it.amt(p), it.amt(p) ? methodLabel(itemMethod(p, it.key)) : "");
+      cells.push(p.ecgNote || "", p.vaccineNote || "", p.masks || 0, maskAmount(p), p.masks ? methodLabel(maskMethod(p)) : "", rowTotal(p), p.createdBy || "");
+      lines.push(cells.map(csvCell).join(","));
     }
     lines.push("");
-    lines.push(["Daily summary"].map(csvCell).join(","));
-    lines.push(["Date", "Total collected", "Cash received", "GCash / advance", "Payouts", "Face masks", "Cash to turn over"].map(csvCell).join(","));
+    lines.push(["Daily summary (money received that day)"].map(csvCell).join(","));
+    lines.push(["Date", "Total collected", "Cash received", "GCash", "Payouts", "Face masks (cash)", "Face masks (GCash)", "Cash to turn over"].map(csvCell).join(","));
     const days = Array.from(new Set(inRange.map((p) => p.date))).sort();
     for (const d of days) {
       const s = summarizeDay(inRange.filter((p) => p.date === d), closings.find((c) => c.date === d));
-      lines.push([d, s.totalCollected, s.cashReceived, s.gcashTotal, s.payoutTotal, s.masks, s.turnOver].map(csvCell).join(","));
+      lines.push([d, s.totalCollected, s.cashReceived, s.gcashTotal, s.payoutTotal, s.masksCash, s.masksGcash, s.turnOver].map(csvCell).join(","));
     }
     const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -5313,15 +5363,52 @@ function PaymentsPage({ data, persist, currentUser, showToast }) {
     URL.revokeObjectURL(url);
   }
 
-  const th = { textAlign: "left", fontSize: 10.5, color: "#5B6B68", textTransform: "uppercase", letterSpacing: 0.3, padding: "7px 6px", borderBottom: "1.5px solid #DCE3E1", fontWeight: 700 };
-  const td = { padding: "9px 6px", borderBottom: "1px solid #EDF1F0", fontSize: 13, verticalAlign: "middle" };
+  const th = { textAlign: "left", fontSize: 10.5, color: "#5B6B68", textTransform: "uppercase", letterSpacing: 0.3, padding: "7px 5px", borderBottom: "1.5px solid #DCE3E1", fontWeight: 700, whiteSpace: "nowrap" };
+  const td = { padding: "9px 5px", borderBottom: "1px solid #EDF1F0", fontSize: 12.5, verticalAlign: "top" };
   const num = { textAlign: "right", fontFamily: "IBM Plex Mono, monospace" };
   const tag = (m) => ({
-    display: "inline-block", fontSize: 9.5, fontWeight: 700, padding: "1px 6px", borderRadius: 5, marginLeft: 6, verticalAlign: 1, textTransform: "uppercase",
-    background: m === "cash" ? "#EAF3F1" : m === "gcash" ? "#E3F1FB" : "#FBF1DF",
-    color: m === "cash" ? "#0F5E56" : m === "gcash" ? "#1A5FA8" : "#6B4A1F",
+    display: "inline-block", fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 5, marginLeft: 4, verticalAlign: 1, textTransform: "uppercase",
+    background: m === "cash" ? "#EAF3F1" : "#E3F1FB", color: m === "cash" ? "#0F5E56" : "#1A5FA8",
   });
-  const sumRow = { display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid #EDF1F0", fontSize: 13.5 };
+  const advTag = { display: "inline-block", fontSize: 9.5, fontWeight: 700, padding: "1px 7px", borderRadius: 5, background: "#FBF1DF", color: "#6B4A1F", marginTop: 3 };
+  const sumRow = { display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #EDF1F0", fontSize: 13 };
+
+  const cellFor = (p, it, muted) => {
+    const a = it.amt(p);
+    return (
+      <td key={it.key} style={{ ...td, ...num, color: muted ? "#9AA7A4" : undefined }}>
+        {a ? peso(a) : "—"}
+        {!!a && !muted && <span style={tag(itemMethod(p, it.key))}>{methodLabel(itemMethod(p, it.key))}</span>}
+        {it.key === "ecg" && !!p.ecgNote && <div style={{ fontFamily: "Inter, sans-serif", fontSize: 10.5, color: "#8A9793", textAlign: "right" }}>{p.ecgNote}</div>}
+        {it.key === "vaccine" && !!p.vaccineNote && <div style={{ fontFamily: "Inter, sans-serif", fontSize: 10.5, color: "#8A9793", textAlign: "right" }}>{p.vaccineNote}</div>}
+      </td>
+    );
+  };
+  const renderRow = (p, i, muted) => (
+    <tr key={p.id} style={muted ? { background: "#FBFCFB" } : undefined}>
+      <td style={td}>{i + 1}</td>
+      <td style={{ ...td, fontWeight: 600, color: muted ? "#7C8A87" : undefined }}>
+        {patientName(p)}
+        {muted ? (
+          <div><span style={{ ...advTag, background: "#EDE9F7", color: "#5B3FA0" }}>Prepaid · paid {fmtShort(p.date)}</span></div>
+        ) : p.advance && p.advanceFor && p.advanceFor !== p.date ? (
+          <div><span style={advTag}>Advance → {fmtShort(p.advanceFor)}</span></div>
+        ) : null}
+        {p.advance && !!p.advanceNote && <div style={{ fontSize: 10.5, fontWeight: 400, color: "#8A9793" }}>{p.advanceNote}</div>}
+      </td>
+      {PAY_ITEMS.slice(0, 5).map((it) => cellFor(p, it, muted))}
+      {cellFor(p, PAY_ITEMS[5], muted)}
+      <td style={{ ...td, ...num, color: muted ? "#9AA7A4" : undefined }}>
+        {p.masks ? `${p.masks} pc${p.masks > 1 ? "s" : ""} · ${peso(maskAmount(p))}` : "—"}
+        {!!p.masks && !muted && <span style={tag(maskMethod(p))}>{methodLabel(maskMethod(p))}</span>}
+      </td>
+      <td style={{ ...td, ...num, fontWeight: 700, color: muted ? "#9AA7A4" : undefined }}>{muted ? "not counted" : peso(rowTotal(p))}</td>
+      <td style={{ ...td, whiteSpace: "nowrap", textAlign: "right" }}>
+        <button style={styles.iconBtn} onClick={() => setEditing(p)} aria-label="Edit"><Pencil size={14} /></button>
+        <button style={styles.iconBtn} onClick={() => deletePayment(p.id)} aria-label="Delete"><Trash2 size={14} /></button>
+      </td>
+    </tr>
+  );
 
   return (
     <div>
@@ -5355,53 +5442,32 @@ function PaymentsPage({ data, persist, currentUser, showToast }) {
       )}
 
       <SectionCard title={`Patients — ${fmtDate(date)}`}>
-        {rows.length === 0 ? (
+        {paidRows.length === 0 && prepaidRows.length === 0 ? (
           <EmptyState text="No payments logged for this date yet." />
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 860 }}>
               <thead>
                 <tr>
                   <th style={th}>#</th>
                   <th style={th}>Patient</th>
-                  <th style={th}>Add-ons</th>
-                  <th style={{ ...th, textAlign: "right" }}>Consult</th>
-                  <th style={{ ...th, textAlign: "right" }}>MC / UA</th>
-                  <th style={{ ...th, textAlign: "right" }}>Medications</th>
-                  <th style={{ ...th, textAlign: "right" }}>Face masks</th>
+                  {PAY_ITEMS.slice(0, 5).map((it) => <th key={it.key} style={{ ...th, textAlign: "right" }}>{it.label}</th>)}
+                  <th style={{ ...th, textAlign: "right" }}>Meds</th>
+                  <th style={{ ...th, textAlign: "right" }}>Masks</th>
                   <th style={{ ...th, textAlign: "right" }}>Row total</th>
                   <th style={th}></th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((p, i) => (
-                  <tr key={p.id}>
-                    <td style={td}>{i + 1}</td>
-                    <td style={{ ...td, fontWeight: 600 }}>{patientName(p)}</td>
-                    <td style={td}>
-                      {!p.mc && !p.ua && <span style={{ color: "#B5BFBD", fontSize: 12 }}>none</span>}
-                      {!!p.mc && <span style={{ ...styles.pill, background: "#E8EEF9", color: "#2B4A8B", marginRight: 4 }}>MC ₱{p.mc}</span>}
-                      {!!p.ua && <span style={{ ...styles.pill, background: "#FBF1DF", color: "#6B4A1F" }}>UA ₱{p.ua}</span>}
-                    </td>
-                    <td style={{ ...td, ...num }}>
-                      {p.consultAmt ? peso(p.consultAmt) : "—"}
-                      {servicesTotal(p) > 0 && <span style={tag(p.svcMethod || "cash")}>{methodLabel(p.svcMethod)}</span>}
-                    </td>
-                    <td style={{ ...td, ...num }}>{(Number(p.mc) || 0) + (Number(p.ua) || 0) ? peso((Number(p.mc) || 0) + (Number(p.ua) || 0)) : "—"}</td>
-                    <td style={{ ...td, ...num }}>
-                      {p.medsAmt ? peso(p.medsAmt) : "—"}
-                      {!!p.medsAmt && <span style={tag(p.medsMethod || "cash")}>{methodLabel(p.medsMethod)}</span>}
-                    </td>
-                    <td style={{ ...td, ...num }}>{p.masks ? `${p.masks} pc${p.masks > 1 ? "s" : ""} · ${peso(maskAmount(p))}` : "—"}</td>
-                    <td style={{ ...td, ...num, fontWeight: 700 }}>{peso(rowTotal(p))}</td>
-                    <td style={{ ...td, whiteSpace: "nowrap", textAlign: "right" }}>
-                      <button style={styles.iconBtn} onClick={() => setEditing(p)} aria-label="Edit"><Pencil size={14} /></button>
-                      <button style={styles.iconBtn} onClick={() => deletePayment(p.id)} aria-label="Delete"><Trash2 size={14} /></button>
-                    </td>
-                  </tr>
-                ))}
+                {paidRows.map((p, i) => renderRow(p, i, false))}
+                {prepaidRows.map((p, i) => renderRow(p, paidRows.length + i, true))}
               </tbody>
             </table>
+          </div>
+        )}
+        {prepaidRows.length > 0 && (
+          <div style={{ marginTop: 10, fontSize: 12, background: "#EDE9F7", color: "#5B3FA0", borderRadius: 8, padding: "7px 10px" }}>
+            Prepaid for today's visits (received earlier, not counted in today's totals): <b>₱ {peso(prepaidTotal)}</b>
           </div>
         )}
       </SectionCard>
@@ -5411,30 +5477,49 @@ function PaymentsPage({ data, persist, currentUser, showToast }) {
         action={<button style={styles.primaryBtn} onClick={() => setShowClose(true)}><Pencil size={14} /> Payouts &amp; face masks</button>}
       >
         <div style={{ display: "flex", gap: 28, flexWrap: "wrap" }}>
-          <div style={{ flex: 1, minWidth: 260 }}>
-            <div style={{ ...styles.label, margin: "2px 0" }}>Collected</div>
-            <div style={sumRow}><span>Consult &amp; services (cash)</span><b style={styles.mono}>{peso(sum.consultCash)}</b></div>
-            <div style={sumRow}><span>Consult &amp; services (GCash / advance)</span><b style={styles.mono}>{peso(sum.consultGcash)}</b></div>
-            <div style={sumRow}><span>Medications</span><b style={styles.mono}>{peso(sum.medsTotal)}</b></div>
-            <div style={{ ...sumRow, fontWeight: 700, borderBottom: "2px solid #12312D" }}><span>Total collected</span><b style={styles.mono}>{peso(sum.totalCollected)}</b></div>
-            <div style={{ ...styles.label, margin: "14px 0 2px" }}>By payment type</div>
-            <div style={sumRow}><span>GCash / advance — consult</span><b style={styles.mono}>{peso(sum.consultGcash)}</b></div>
-            <div style={sumRow}><span>GCash / advance — medications</span><b style={styles.mono}>{peso(sum.medsGcash)}</b></div>
-            <div style={{ ...sumRow, fontWeight: 700, borderBottom: "2px solid #12312D" }}><span>Total GCash / advance</span><b style={styles.mono}>{peso(sum.gcashTotal)}</b></div>
+          <div style={{ flex: 1.2, minWidth: 300 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 80px 84px", fontSize: 10.5, color: "#5B6B68", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3, paddingBottom: 4, borderBottom: "1.5px solid #DCE3E1" }}>
+              <span>Money received today</span><span style={{ textAlign: "right" }}>Cash</span><span style={{ textAlign: "right" }}>GCash</span><span style={{ textAlign: "right" }}>Total</span>
+            </div>
+            {PAY_ITEMS.map((it) => {
+              const v = sum.byItem[it.key];
+              return (
+                <div key={it.key} style={{ display: "grid", gridTemplateColumns: "1fr 80px 80px 84px", padding: "6px 0", borderBottom: "1px solid #EDF1F0", fontSize: 13 }}>
+                  <span>{it.label}</span>
+                  <b style={{ ...styles.mono, textAlign: "right", fontWeight: 400 }}>{peso(v.cash)}</b>
+                  <b style={{ ...styles.mono, textAlign: "right", fontWeight: 400 }}>{peso(v.gcash)}</b>
+                  <b style={{ ...styles.mono, textAlign: "right" }}>{peso(v.cash + v.gcash)}</b>
+                </div>
+              );
+            })}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 80px 84px", padding: "7px 0", borderBottom: "2px solid #12312D", fontSize: 13.5, fontWeight: 700 }}>
+              <span>Total collected</span>
+              <b style={{ ...styles.mono, textAlign: "right" }}>{peso(sum.cashReceived)}</b>
+              <b style={{ ...styles.mono, textAlign: "right" }}>{peso(sum.gcashTotal)}</b>
+              <b style={{ ...styles.mono, textAlign: "right" }}>{peso(sum.totalCollected)}</b>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 80px 84px", padding: "6px 0", fontSize: 13, color: "#5B3FA0" }}>
+              <span>Face masks (₱5, not in total)</span>
+              <b style={{ ...styles.mono, textAlign: "right", fontWeight: 400 }}>{peso(sum.masksCash)}</b>
+              <b style={{ ...styles.mono, textAlign: "right", fontWeight: 400 }}>{peso(sum.masksGcash)}</b>
+              <b style={{ ...styles.mono, textAlign: "right" }}>{peso(sum.masks)}</b>
+            </div>
+            {sum.advanceReceived > 0 && (
+              <div style={{ fontSize: 11.5, background: "#FBF1DF", color: "#6B4A1F", borderRadius: 8, padding: "6px 10px", marginTop: 6 }}>
+                Includes ₱ {peso(sum.advanceReceived)} received today as advance for future visits.
+              </div>
+            )}
           </div>
           <div style={{ flex: 1, minWidth: 260 }}>
             <div style={{ ...styles.label, margin: "2px 0" }}>Cash on hand</div>
-            <div style={sumRow}><span>Total collected</span><b style={styles.mono}>{peso(sum.totalCollected)}</b></div>
-            <div style={sumRow}><span>− GCash / advance</span><b style={{ ...styles.mono, color: "#B23B3B" }}>{peso(sum.gcashTotal)}</b></div>
-            <div style={{ ...sumRow, fontWeight: 700, borderBottom: "2px solid #12312D" }}><span>Cash received</span><b style={styles.mono}>{peso(sum.cashReceived)}</b></div>
-            <div style={{ ...styles.label, margin: "14px 0 2px" }}>Payouts</div>
+            <div style={sumRow}><span>Cash received</span><b style={styles.mono}>{peso(sum.cashReceived)}</b></div>
             {sum.payouts.map((x) => (
               <div key={x.id} style={sumRow}>
-                <span>{x.label}{x.name ? ` — ${x.name}` : ""}</span>
+                <span>− {x.label}{x.name ? ` — ${x.name}` : ""}</span>
                 <b style={{ ...styles.mono, color: "#B23B3B" }}>{peso(x.amount)}</b>
               </div>
             ))}
-            <div style={sumRow}><span>Face masks sold (₱5 each, added to cash)</span><b style={styles.mono}>+{peso(sum.masks)}</b></div>
+            <div style={sumRow}><span>+ Face masks (cash)</span><b style={styles.mono}>{peso(sum.masksCash)}</b></div>
             <div style={{ display: "flex", justifyContent: "space-between", background: "#0F2925", color: "#fff", borderRadius: 10, padding: "12px 14px", marginTop: 10, fontSize: 15, fontWeight: 700 }}>
               <span>Cash to turn over</span><span style={{ fontFamily: "IBM Plex Mono, monospace" }}>₱ {peso(sum.turnOver)}</span>
             </div>
@@ -5468,69 +5553,112 @@ function PaymentsPage({ data, persist, currentUser, showToast }) {
   );
 }
 
-function PaymentForm({ patients, initial, onSubmit }) {
-  const [patientId, setPatientId] = useState(initial.patientId || "");
-  const [consultAmt, setConsultAmt] = useState(initial.consultAmt ?? "");
-  const [mc, setMc] = useState(Number(initial.mc) || 0);
-  const [ua, setUa] = useState(!!initial.ua);
-  const [svcMethod, setSvcMethod] = useState(initial.svcMethod || "cash");
-  const [medsAmt, setMedsAmt] = useState(initial.medsAmt ?? "");
-  const [medsMethod, setMedsMethod] = useState(initial.medsMethod || "cash");
-  const [masks, setMasks] = useState(initial.masks ?? "");
-
-  const consultNum = Number(consultAmt) || 0;
-  const medsNum = Number(medsAmt) || 0;
-  const total = consultNum + mc + (ua ? UA_FEE : 0) + medsNum;
-  const masksNum = Math.max(0, Math.floor(Number(masks) || 0));
-  const canSave = !!patientId && (total > 0 || masksNum > 0);
-
-  const methodPicker = (value, setValue) => (
-    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+function MethodToggle({ value, onChange }) {
+  return (
+    <span style={{ display: "inline-flex", gap: 4 }}>
       {PAY_METHODS.map((m) => (
-        <button key={m.key} type="button" onClick={() => setValue(m.key)} style={{ ...styles.pillToggle, ...(value === m.key ? styles.pillToggleActive : {}) }}>
+        <button key={m.key} type="button" onClick={() => onChange(m.key)} style={{ ...styles.pillToggle, padding: "5px 11px", ...(value === m.key ? styles.pillToggleActive : {}) }}>
           {m.label}
         </button>
       ))}
-    </div>
+    </span>
+  );
+}
+
+function PaymentForm({ patients, initial, onSubmit }) {
+  const num = (v) => (v === undefined || v === null ? "" : v);
+  const [patientId, setPatientId] = useState(initial.patientId || "");
+  const [consultAmt, setConsultAmt] = useState(num(initial.consultAmt));
+  const [mc, setMc] = useState(Number(initial.mc) || 0);
+  const [ua, setUa] = useState(!!Number(initial.ua));
+  const [ecgAmt, setEcgAmt] = useState(num(initial.ecgAmt));
+  const [vaccineAmt, setVaccineAmt] = useState(num(initial.vaccineAmt));
+  const [medsAmt, setMedsAmt] = useState(num(initial.medsAmt));
+  const [masks, setMasks] = useState(num(initial.masks));
+  const [ecgNote, setEcgNote] = useState(initial.ecgNote || "");
+  const [vaccineNote, setVaccineNote] = useState(initial.vaccineNote || "");
+  const [methods, setMethods] = useState(() => ({
+    consult: itemMethod(initial, "consult"), mc: itemMethod(initial, "mc"), ua: itemMethod(initial, "ua"),
+    ecg: itemMethod(initial, "ecg"), vaccine: itemMethod(initial, "vaccine"), meds: itemMethod(initial, "meds"),
+    masks: maskMethod(initial),
+  }));
+  const [advance, setAdvance] = useState(!!initial.advance);
+  const [advanceFor, setAdvanceFor] = useState(initial.advanceFor || "");
+  const [advanceNote, setAdvanceNote] = useState(initial.advanceNote || "");
+  const setM = (k, v) => setMethods((cur) => ({ ...cur, [k]: v }));
+
+  const n = (v) => Math.max(0, Number(v) || 0);
+  const total = n(consultAmt) + mc + (ua ? UA_FEE : 0) + n(ecgAmt) + n(vaccineAmt) + n(medsAmt);
+  const masksNum = Math.max(0, Math.floor(Number(masks) || 0));
+  const advanceOk = !advance || !!advanceFor;
+  const canSave = !!patientId && (total > 0 || masksNum > 0) && advanceOk;
+
+  const lineStyle = { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" };
+  const nameStyle = { width: 92, fontSize: 13, fontWeight: 600, color: "#12312D" };
+  const amtInput = (value, set, ph) => (
+    <input type="number" min="0" inputMode="decimal" style={{ ...styles.input, width: 96 }} value={value} onChange={(e) => set(e.target.value)} placeholder={ph || "₱"} />
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
       <Field label="Patient">
         <PatientPicker patients={patients} value={patientId} onChange={setPatientId} />
       </Field>
 
-      <Field label="Consult fee (₱)">
-        <input type="number" min="0" inputMode="decimal" style={styles.input} value={consultAmt} onChange={(e) => setConsultAmt(e.target.value)} placeholder="e.g. 350" />
-      </Field>
+      <div style={{ ...styles.label, marginTop: 2 }}>Items &amp; how each was paid</div>
 
-      <Field label="Add-ons (charged with the consult)">
-        <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <span style={{ fontSize: 12.5, color: "#5B6B68" }}>MC</span>
-            {MC_OPTIONS.map((v) => (
-              <button key={v} type="button" onClick={() => setMc(v)} style={{ ...styles.pillToggle, ...(mc === v ? styles.pillToggleActive : {}) }}>
-                {v === 0 ? "None" : `₱${v}`}
-              </button>
-            ))}
+      <div style={lineStyle}><span style={nameStyle}>Consult</span>{amtInput(consultAmt, setConsultAmt)}<MethodToggle value={methods.consult} onChange={(v) => setM("consult", v)} /></div>
+
+      <div style={lineStyle}>
+        <span style={nameStyle}>MC</span>
+        <span style={{ display: "inline-flex", gap: 4 }}>
+          {MC_OPTIONS.map((v) => (
+            <button key={v} type="button" onClick={() => setMc(v)} style={{ ...styles.pillToggle, padding: "5px 11px", ...(mc === v ? styles.pillToggleActive : {}) }}>
+              {v === 0 ? "None" : `₱${v}`}
+            </button>
+          ))}
+        </span>
+        {mc > 0 && <MethodToggle value={methods.mc} onChange={(v) => setM("mc", v)} />}
+      </div>
+
+      <div style={lineStyle}>
+        <span style={nameStyle}>UA</span>
+        <button type="button" onClick={() => setUa(!ua)} style={{ ...styles.pillToggle, padding: "5px 11px", ...(ua ? styles.pillToggleActive : {}) }}>₱{UA_FEE}</button>
+        {ua && <MethodToggle value={methods.ua} onChange={(v) => setM("ua", v)} />}
+      </div>
+
+      <div style={lineStyle}><span style={nameStyle}>ECG</span>{amtInput(ecgAmt, setEcgAmt)}<MethodToggle value={methods.ecg} onChange={(v) => setM("ecg", v)} /></div>
+      {n(ecgAmt) > 0 && <input style={{ ...styles.input, marginTop: -4 }} value={ecgNote} onChange={(e) => setEcgNote(e.target.value)} placeholder="ECG note (optional)" />}
+
+      <div style={lineStyle}><span style={nameStyle}>Vaccine</span>{amtInput(vaccineAmt, setVaccineAmt)}<MethodToggle value={methods.vaccine} onChange={(v) => setM("vaccine", v)} /></div>
+      <input style={{ ...styles.input, marginTop: -4 }} value={vaccineNote} onChange={(e) => setVaccineNote(e.target.value)} placeholder="Vaccine note — e.g. Flu vaccine, Hep B dose 2" />
+
+      <div style={lineStyle}><span style={nameStyle}>Medications</span>{amtInput(medsAmt, setMedsAmt)}<MethodToggle value={methods.meds} onChange={(v) => setM("meds", v)} /></div>
+
+      <div style={lineStyle}>
+        <span style={nameStyle}>Face masks</span>
+        <input type="number" min="0" step="1" inputMode="numeric" style={{ ...styles.input, width: 96 }} value={masks} onChange={(e) => setMasks(e.target.value)} placeholder="pcs" />
+        <MethodToggle value={methods.masks} onChange={(v) => setM("masks", v)} />
+        {masksNum > 0 && <span style={{ fontSize: 11.5, color: "#8A9793" }}>₱{peso(masksNum * MASK_PRICE)} · not in row total</span>}
+      </div>
+
+      <div style={{ background: "#FBF1DF", border: "1px solid #EAD6A8", borderRadius: 10, padding: "10px 12px" }}>
+        <button type="button" onClick={() => setAdvance(!advance)} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 13, fontWeight: 700, color: "#6B4A1F" }}>
+          <span style={{ width: 16, height: 16, borderRadius: 4, background: advance ? "#8A5A12" : "#fff", border: "1.5px solid #8A5A12", color: "#fff", fontSize: 11, lineHeight: "13px", textAlign: "center" }}>{advance ? "✓" : ""}</span>
+          Advance payment — for a future visit
+        </button>
+        {advance && (
+          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+            <Field label="Visit date" style={{ flex: 1 }}>
+              <input type="date" style={styles.input} value={advanceFor} onChange={(e) => setAdvanceFor(e.target.value)} />
+            </Field>
+            <Field label="Note" style={{ flex: 1.4 }}>
+              <input style={styles.input} value={advanceNote} onChange={(e) => setAdvanceNote(e.target.value)} placeholder="e.g. booked by phone" />
+            </Field>
           </div>
-          <button type="button" onClick={() => setUa(!ua)} style={{ ...styles.pillToggle, ...(ua ? styles.pillToggleActive : {}) }}>
-            UA ₱{UA_FEE}
-          </button>
-        </div>
-      </Field>
-
-      <Field label="Consult & add-ons paid via">{methodPicker(svcMethod, setSvcMethod)}</Field>
-
-      <Field label="Medications bought (₱)">
-        <input type="number" min="0" inputMode="decimal" style={styles.input} value={medsAmt} onChange={(e) => setMedsAmt(e.target.value)} placeholder="e.g. 638 — leave blank if none" />
-      </Field>
-      {medsNum > 0 && <Field label="Medications paid via">{methodPicker(medsMethod, setMedsMethod)}</Field>}
-
-      <Field label={`Face masks bought (pieces) — ₱${MASK_PRICE} each, paid in cash`}>
-        <input type="number" min="0" step="1" inputMode="numeric" style={styles.input} value={masks} onChange={(e) => setMasks(e.target.value)} placeholder="leave blank if none" />
-        {masksNum > 0 && <div style={{ fontSize: 11.5, color: "#8A9793" }}>₱{peso(masksNum * MASK_PRICE)} — counted in the day's face-mask sales, not in the row total</div>}
-      </Field>
+        )}
+        {advance && <div style={{ fontSize: 11.5, color: "#6B4A1F", marginTop: 6 }}>Counted today (money received today). On the visit date it shows as prepaid and is not counted again.</div>}
+      </div>
 
       <div style={{ display: "flex", justifyContent: "space-between", background: "#EAF3F1", borderRadius: 9, padding: "10px 12px", fontSize: 14, fontWeight: 700, color: "#12312D" }}>
         <span>Row total</span><span style={{ fontFamily: "IBM Plex Mono, monospace" }}>₱ {peso(total)}</span>
@@ -5541,13 +5669,23 @@ function PaymentForm({ patients, initial, onSubmit }) {
         disabled={!canSave}
         onClick={() => onSubmit({
           ...(initial.id ? { id: initial.id } : {}),
-          patientId, consultAmt: consultNum, mc, ua: ua ? UA_FEE : 0, svcMethod,
-          medsAmt: medsNum, medsMethod, masks: masksNum,
+          patientId,
+          consultAmt: n(consultAmt), consultMethod: methods.consult,
+          mc, mcMethod: methods.mc,
+          ua: ua ? UA_FEE : 0, uaMethod: methods.ua,
+          ecgAmt: n(ecgAmt), ecgMethod: methods.ecg, ecgNote: ecgNote.trim(),
+          vaccineAmt: n(vaccineAmt), vaccineMethod: methods.vaccine, vaccineNote: vaccineNote.trim(),
+          medsAmt: n(medsAmt), medsMethod: methods.meds,
+          masks: masksNum, maskMethod: methods.masks,
+          advance, advanceFor: advance ? advanceFor : "", advanceNote: advance ? advanceNote.trim() : "",
+          svcMethod: undefined,
         })}
       >
         <Check size={15} /> Save
       </button>
-      {!canSave && <div style={{ fontSize: 12, color: "#8A9793" }}>Pick a patient and enter at least one amount or face mask.</div>}
+      {!canSave && <div style={{ fontSize: 12, color: "#8A9793" }}>
+        {!patientId ? "Pick a patient." : !advanceOk ? "Pick the visit date for this advance payment." : "Enter at least one amount or face mask."}
+      </div>}
     </div>
   );
 }
@@ -5576,7 +5714,7 @@ function ClosingForm({ initial, onSubmit }) {
           </Field>
         </div>
       ))}
-      <Field label="Extra face-mask sales not logged on a patient (₱)">
+      <Field label="Extra face-mask sales not logged on a patient (₱, cash)">
         <input type="number" min="0" inputMode="decimal" style={styles.input} value={masksAmt} onChange={(e) => setMasksAmt(e.target.value)} placeholder="e.g. 210" />
         {masksNum > 0 && <div style={{ fontSize: 11.5, color: "#8A9793" }}>≈ {Math.round(masksNum / 5)} masks</div>}
       </Field>
