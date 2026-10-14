@@ -409,6 +409,15 @@ function mergeField(freshValue, staleValue, nextValue) {
     // arrays) survives too.
     merged.set(item.id, freshVersion && staleVersion ? mergeRecord(freshVersion, staleVersion, item) : item);
   }
+  // Deletions: anything this session knew about (`stale`) that is no longer in `next` was
+  // removed by this session on purpose — drop it from the merged result too. Without this,
+  // starting from the database's copy meant a cancelled appointment (or any removed record)
+  // was silently put back by the merge, so deleting never stuck. Records that exist only in
+  // `fresh` (added by another account since this session last loaded) are untouched.
+  const nextIds = new Set(nextValue.map((x) => x.id));
+  for (const id of staleById.keys()) {
+    if (!nextIds.has(id)) merged.delete(id);
+  }
   return Array.from(merged.values());
 }
 
