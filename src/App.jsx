@@ -5194,7 +5194,7 @@ const PAY_METHODS = [
   { key: "cash", label: "Cash" },
   { key: "gcash", label: "GCash" },
 ];
-const MC_OPTIONS = [0, 50, 150];
+const MC_OPTIONS = [0, 50, 150, 300];
 const UA_FEE = 50;
 const MASK_PRICE = 5;
 const PAYOUT_SLOTS = [
@@ -5209,6 +5209,7 @@ const PAY_ITEMS = [
   { key: "ua", label: "UA", amt: (p) => Number(p.ua) || 0 },
   { key: "ecg", label: "ECG", amt: (p) => Number(p.ecgAmt) || 0 },
   { key: "vaccine", label: "Vaccine", amt: (p) => Number(p.vaccineAmt) || 0 },
+  { key: "misc", label: "Misc.", amt: (p) => Number(p.miscAmt) || 0 },
   { key: "meds", label: "Medications", amt: (p) => Number(p.medsAmt) || 0 },
 ];
 
@@ -5265,11 +5266,13 @@ function summarizeDay(rows, closing) {
     const found = (closing?.payouts || []).find((x) => x.id === slot.id);
     return { id: slot.id, label: slot.label, name: found?.name || "", amount: Number(found?.amount) || 0 };
   });
-  const payoutTotal = payouts.reduce((s, x) => s + x.amount, 0);
+  const cashOuts = (closing?.cashOuts || []).map((c) => ({ id: c.id, note: c.note || "", amount: Number(c.amount) || 0 }));
+  const cashOutTotal = cashOuts.reduce((t, c) => t + c.amount, 0);
+  const payoutTotal = payouts.reduce((s, x) => s + x.amount, 0) + cashOutTotal;
   let cashReceived = 0, gcashTotal = 0;
   for (const it of PAY_ITEMS) { cashReceived += byItem[it.key].cash; gcashTotal += byItem[it.key].gcash; }
   return {
-    byItem, masksCash, masksGcash, masks: masksCash + masksGcash, payouts, payoutTotal,
+    byItem, masksCash, masksGcash, masks: masksCash + masksGcash, payouts, cashOuts, cashOutTotal, payoutTotal,
     cashReceived, gcashTotal, totalCollected: cashReceived + gcashTotal, advanceReceived,
     turnOver: cashReceived - payoutTotal + masksCash,
   };
@@ -5325,7 +5328,7 @@ function PaymentsPage({ data, persist, currentUser, showToast }) {
   }
 
   async function saveClosing(entry) {
-    const record = { id: `close-${date}`, date, masksAmt: entry.masksAmt, payouts: entry.payouts, updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
+    const record = { id: `close-${date}`, date, masksAmt: entry.masksAmt, payouts: entry.payouts, cashOuts: entry.cashOuts, updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
     const exists = closings.some((c) => c.id === record.id);
     await persist({ ...data, dailyClosings: exists ? closings.map((c) => (c.id === record.id ? record : c)) : [...closings, record] });
     showToast("Day-end entries saved");
@@ -5336,21 +5339,21 @@ function PaymentsPage({ data, persist, currentUser, showToast }) {
     const inRange = payments.filter((p) => p.date >= exportFrom && p.date <= exportTo).sort((a, b) => a.date.localeCompare(b.date) || byCreated(a, b));
     const head = ["Date paid", "Patient", "Advance for visit date", "Advance note"];
     for (const it of PAY_ITEMS) head.push(it.label, `${it.label} paid via`);
-    head.push("ECG note", "Vaccine note", "Face masks (pcs)", "Face masks (₱)", "Masks paid via", "Row total (excl. masks)", "Entered by");
+    head.push("MC note", "ECG note", "Vaccine note", "Misc. note", "Face masks (pcs)", "Face masks (₱)", "Masks paid via", "Row total (excl. masks)", "Entered by");
     const lines = [head.map(csvCell).join(",")];
     for (const p of inRange) {
       const cells = [p.date, patientName(p), p.advance ? p.advanceFor || "" : "", p.advance ? p.advanceNote || "" : ""];
       for (const it of PAY_ITEMS) cells.push(it.amt(p), it.amt(p) ? methodLabel(itemMethod(p, it.key)) : "");
-      cells.push(p.ecgNote || "", p.vaccineNote || "", p.masks || 0, maskAmount(p), p.masks ? methodLabel(maskMethod(p)) : "", rowTotal(p), p.createdBy || "");
+      cells.push(p.mcNote || "", p.ecgNote || "", p.vaccineNote || "", p.miscNote || "", p.masks || 0, maskAmount(p), p.masks ? methodLabel(maskMethod(p)) : "", rowTotal(p), p.createdBy || "");
       lines.push(cells.map(csvCell).join(","));
     }
     lines.push("");
     lines.push(["Daily summary (money received that day)"].map(csvCell).join(","));
-    lines.push(["Date", "Total collected", "Cash received", "GCash", "Payouts", "Face masks (cash)", "Face masks (GCash)", "Cash to turn over"].map(csvCell).join(","));
+    lines.push(["Date", "Total collected", "Cash received", "GCash", "Payouts + cash outs", "Cash outs (detail)", "Face masks (cash)", "Face masks (GCash)", "Cash to turn over"].map(csvCell).join(","));
     const days = Array.from(new Set(inRange.map((p) => p.date))).sort();
     for (const d of days) {
       const s = summarizeDay(inRange.filter((p) => p.date === d), closings.find((c) => c.date === d));
-      lines.push([d, s.totalCollected, s.cashReceived, s.gcashTotal, s.payoutTotal, s.masksCash, s.masksGcash, s.turnOver].map(csvCell).join(","));
+      lines.push([d, s.totalCollected, s.cashReceived, s.gcashTotal, s.payoutTotal, s.cashOuts.map((c) => `${c.note || "cash out"}: ${c.amount}`).join("; "), s.masksCash, s.masksGcash, s.turnOver].map(csvCell).join(","));
     }
     const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -5379,6 +5382,8 @@ function PaymentsPage({ data, persist, currentUser, showToast }) {
       <td key={it.key} style={{ ...td, ...num, color: muted ? "#9AA7A4" : undefined }}>
         {a ? peso(a) : "—"}
         {!!a && !muted && <span style={tag(itemMethod(p, it.key))}>{methodLabel(itemMethod(p, it.key))}</span>}
+        {it.key === "misc" && !!p.miscNote && <div style={{ fontFamily: "Inter, sans-serif", fontSize: 10.5, color: "#8A9793", textAlign: "right" }}>{p.miscNote}</div>}
+        {it.key === "mc" && !!p.mcNote && <div style={{ fontFamily: "Inter, sans-serif", fontSize: 10.5, color: "#8A9793", textAlign: "right" }}>{p.mcNote}</div>}
         {it.key === "ecg" && !!p.ecgNote && <div style={{ fontFamily: "Inter, sans-serif", fontSize: 10.5, color: "#8A9793", textAlign: "right" }}>{p.ecgNote}</div>}
         {it.key === "vaccine" && !!p.vaccineNote && <div style={{ fontFamily: "Inter, sans-serif", fontSize: 10.5, color: "#8A9793", textAlign: "right" }}>{p.vaccineNote}</div>}
       </td>
@@ -5396,8 +5401,7 @@ function PaymentsPage({ data, persist, currentUser, showToast }) {
         ) : null}
         {p.advance && !!p.advanceNote && <div style={{ fontSize: 10.5, fontWeight: 400, color: "#8A9793" }}>{p.advanceNote}</div>}
       </td>
-      {PAY_ITEMS.slice(0, 5).map((it) => cellFor(p, it, muted))}
-      {cellFor(p, PAY_ITEMS[5], muted)}
+      {PAY_ITEMS.map((it) => cellFor(p, it, muted))}
       <td style={{ ...td, ...num, color: muted ? "#9AA7A4" : undefined }}>
         {p.masks ? `${p.masks} pc${p.masks > 1 ? "s" : ""} · ${peso(maskAmount(p))}` : "—"}
         {!!p.masks && !muted && <span style={tag(maskMethod(p))}>{methodLabel(maskMethod(p))}</span>}
@@ -5446,13 +5450,12 @@ function PaymentsPage({ data, persist, currentUser, showToast }) {
           <EmptyState text="No payments logged for this date yet." />
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 860 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 940 }}>
               <thead>
                 <tr>
                   <th style={th}>#</th>
                   <th style={th}>Patient</th>
-                  {PAY_ITEMS.slice(0, 5).map((it) => <th key={it.key} style={{ ...th, textAlign: "right" }}>{it.label}</th>)}
-                  <th style={{ ...th, textAlign: "right" }}>Meds</th>
+                  {PAY_ITEMS.map((it) => <th key={it.key} style={{ ...th, textAlign: "right" }}>{it.key === "meds" ? "Meds" : it.label}</th>)}
                   <th style={{ ...th, textAlign: "right" }}>Masks</th>
                   <th style={{ ...th, textAlign: "right" }}>Row total</th>
                   <th style={th}></th>
@@ -5474,7 +5477,7 @@ function PaymentsPage({ data, persist, currentUser, showToast }) {
 
       <SectionCard
         title={`End-of-day summary — ${fmtDate(date)}`}
-        action={<button style={styles.primaryBtn} onClick={() => setShowClose(true)}><Pencil size={14} /> Payouts &amp; face masks</button>}
+        action={<button style={styles.primaryBtn} onClick={() => setShowClose(true)}><Pencil size={14} /> Payouts, cash out &amp; masks</button>}
       >
         <div style={{ display: "flex", gap: 28, flexWrap: "wrap" }}>
           <div style={{ flex: 1.2, minWidth: 300 }}>
@@ -5519,6 +5522,12 @@ function PaymentsPage({ data, persist, currentUser, showToast }) {
                 <b style={{ ...styles.mono, color: "#B23B3B" }}>{peso(x.amount)}</b>
               </div>
             ))}
+            {sum.cashOuts.map((c) => (
+              <div key={c.id} style={sumRow}>
+                <span>− Cash out{c.note ? ` — ${c.note}` : ""}</span>
+                <b style={{ ...styles.mono, color: "#B23B3B" }}>{peso(c.amount)}</b>
+              </div>
+            ))}
             <div style={sumRow}><span>+ Face masks (cash)</span><b style={styles.mono}>{peso(sum.masksCash)}</b></div>
             <div style={{ display: "flex", justifyContent: "space-between", background: "#0F2925", color: "#fff", borderRadius: 10, padding: "12px 14px", marginTop: 10, fontSize: 15, fontWeight: 700 }}>
               <span>Cash to turn over</span><span style={{ fontFamily: "IBM Plex Mono, monospace" }}>₱ {peso(sum.turnOver)}</span>
@@ -5545,7 +5554,7 @@ function PaymentsPage({ data, persist, currentUser, showToast }) {
         </Modal>
       )}
       {showClose && (
-        <Modal onClose={() => setShowClose(false)} title={`Payouts & face masks — ${fmtDate(date)}`}>
+        <Modal onClose={() => setShowClose(false)} title={`Payouts, cash out & face masks — ${fmtDate(date)}`}>
           <ClosingForm initial={closing} onSubmit={saveClosing} />
         </Modal>
       )}
@@ -5573,13 +5582,16 @@ function PaymentForm({ patients, initial, onSubmit }) {
   const [ua, setUa] = useState(!!Number(initial.ua));
   const [ecgAmt, setEcgAmt] = useState(num(initial.ecgAmt));
   const [vaccineAmt, setVaccineAmt] = useState(num(initial.vaccineAmt));
+  const [miscAmt, setMiscAmt] = useState(num(initial.miscAmt));
+  const [miscNote, setMiscNote] = useState(initial.miscNote || "");
   const [medsAmt, setMedsAmt] = useState(num(initial.medsAmt));
   const [masks, setMasks] = useState(num(initial.masks));
+  const [mcNote, setMcNote] = useState(initial.mcNote || "");
   const [ecgNote, setEcgNote] = useState(initial.ecgNote || "");
   const [vaccineNote, setVaccineNote] = useState(initial.vaccineNote || "");
   const [methods, setMethods] = useState(() => ({
     consult: itemMethod(initial, "consult"), mc: itemMethod(initial, "mc"), ua: itemMethod(initial, "ua"),
-    ecg: itemMethod(initial, "ecg"), vaccine: itemMethod(initial, "vaccine"), meds: itemMethod(initial, "meds"),
+    ecg: itemMethod(initial, "ecg"), vaccine: itemMethod(initial, "vaccine"), misc: itemMethod(initial, "misc"), meds: itemMethod(initial, "meds"),
     masks: maskMethod(initial),
   }));
   const [advance, setAdvance] = useState(!!initial.advance);
@@ -5588,7 +5600,7 @@ function PaymentForm({ patients, initial, onSubmit }) {
   const setM = (k, v) => setMethods((cur) => ({ ...cur, [k]: v }));
 
   const n = (v) => Math.max(0, Number(v) || 0);
-  const total = n(consultAmt) + mc + (ua ? UA_FEE : 0) + n(ecgAmt) + n(vaccineAmt) + n(medsAmt);
+  const total = n(consultAmt) + mc + (ua ? UA_FEE : 0) + n(ecgAmt) + n(vaccineAmt) + n(miscAmt) + n(medsAmt);
   const masksNum = Math.max(0, Math.floor(Number(masks) || 0));
   const advanceOk = !advance || !!advanceFor;
   const canSave = !!patientId && (total > 0 || masksNum > 0) && advanceOk;
@@ -5620,6 +5632,7 @@ function PaymentForm({ patients, initial, onSubmit }) {
         </span>
         {mc > 0 && <MethodToggle value={methods.mc} onChange={(v) => setM("mc", v)} />}
       </div>
+      {mc > 0 && <input style={{ ...styles.input, marginTop: -4 }} value={mcNote} onChange={(e) => setMcNote(e.target.value)} placeholder="MC note — e.g. for work, fit to work, school" />}
 
       <div style={lineStyle}>
         <span style={nameStyle}>UA</span>
@@ -5632,6 +5645,9 @@ function PaymentForm({ patients, initial, onSubmit }) {
 
       <div style={lineStyle}><span style={nameStyle}>Vaccine</span>{amtInput(vaccineAmt, setVaccineAmt)}<MethodToggle value={methods.vaccine} onChange={(v) => setM("vaccine", v)} /></div>
       <input style={{ ...styles.input, marginTop: -4 }} value={vaccineNote} onChange={(e) => setVaccineNote(e.target.value)} placeholder="Vaccine note — e.g. Flu vaccine, Hep B dose 2" />
+
+      <div style={lineStyle}><span style={nameStyle}>Misc.</span>{amtInput(miscAmt, setMiscAmt)}<MethodToggle value={methods.misc} onChange={(v) => setM("misc", v)} /></div>
+      <input style={{ ...styles.input, marginTop: -4 }} value={miscNote} onChange={(e) => setMiscNote(e.target.value)} placeholder="Misc. note — what was it for? (e.g. dressing, injection, nebulization)" />
 
       <div style={lineStyle}><span style={nameStyle}>Medications</span>{amtInput(medsAmt, setMedsAmt)}<MethodToggle value={methods.meds} onChange={(v) => setM("meds", v)} /></div>
 
@@ -5671,10 +5687,11 @@ function PaymentForm({ patients, initial, onSubmit }) {
           ...(initial.id ? { id: initial.id } : {}),
           patientId,
           consultAmt: n(consultAmt), consultMethod: methods.consult,
-          mc, mcMethod: methods.mc,
+          mc, mcMethod: methods.mc, mcNote: mc > 0 ? mcNote.trim() : "",
           ua: ua ? UA_FEE : 0, uaMethod: methods.ua,
           ecgAmt: n(ecgAmt), ecgMethod: methods.ecg, ecgNote: ecgNote.trim(),
           vaccineAmt: n(vaccineAmt), vaccineMethod: methods.vaccine, vaccineNote: vaccineNote.trim(),
+          miscAmt: n(miscAmt), miscMethod: methods.misc, miscNote: miscNote.trim(),
           medsAmt: n(medsAmt), medsMethod: methods.meds,
           masks: masksNum, maskMethod: methods.masks,
           advance, advanceFor: advance ? advanceFor : "", advanceNote: advance ? advanceNote.trim() : "",
@@ -5698,7 +5715,9 @@ function ClosingForm({ initial, onSubmit }) {
       return { id: slot.id, label: slot.label, name: found?.name || "", amount: found?.amount ?? "" };
     })
   );
+  const [cashOuts, setCashOuts] = useState(() => (initial?.cashOuts || []).map((c) => ({ id: c.id, note: c.note || "", amount: c.amount ?? "" })));
   const setP = (id, key, value) => setPayouts((cur) => cur.map((x) => (x.id === id ? { ...x, [key]: value } : x)));
+  const setCO = (id, key, value) => setCashOuts((cur) => cur.map((c) => (c.id === id ? { ...c, [key]: value } : c)));
   const masksNum = Number(masksAmt) || 0;
 
   return (
@@ -5714,6 +5733,24 @@ function ClosingForm({ initial, onSubmit }) {
           </Field>
         </div>
       ))}
+      <div style={{ borderTop: "1px solid #EDF1F0", paddingTop: 10 }}>
+        <div style={styles.label}>Cash out</div>
+        <div style={{ fontSize: 11.5, color: "#8A9793", margin: "2px 0 8px" }}>Money taken out of the drawer for anything else — add as many lines as needed.</div>
+        {cashOuts.map((c) => (
+          <div key={c.id} style={{ display: "flex", gap: 8, alignItems: "flex-end", marginBottom: 8 }}>
+            <Field label="Note" style={{ flex: 1.6 }}>
+              <input style={styles.input} value={c.note} onChange={(e) => setCO(c.id, "note", e.target.value)} placeholder="e.g. bought alcohol, water refill" />
+            </Field>
+            <Field label="Amount (₱)" style={{ flex: 1 }}>
+              <input type="number" min="0" inputMode="decimal" style={styles.input} value={c.amount} onChange={(e) => setCO(c.id, "amount", e.target.value)} />
+            </Field>
+            <button type="button" style={{ ...styles.iconBtn, paddingBottom: 9 }} onClick={() => setCashOuts((cur) => cur.filter((x) => x.id !== c.id))} aria-label="Remove cash out"><Trash2 size={15} /></button>
+          </div>
+        ))}
+        <button type="button" style={styles.linkBtn} onClick={() => setCashOuts((cur) => [...cur, { id: uid("co"), note: "", amount: "" }])}>
+          <Plus size={13} /> Add cash out
+        </button>
+      </div>
       <Field label="Extra face-mask sales not logged on a patient (₱, cash)">
         <input type="number" min="0" inputMode="decimal" style={styles.input} value={masksAmt} onChange={(e) => setMasksAmt(e.target.value)} placeholder="e.g. 210" />
         {masksNum > 0 && <div style={{ fontSize: 11.5, color: "#8A9793" }}>≈ {Math.round(masksNum / 5)} masks</div>}
@@ -5723,6 +5760,7 @@ function ClosingForm({ initial, onSubmit }) {
         onClick={() => onSubmit({
           masksAmt: masksNum,
           payouts: payouts.map((x) => ({ id: x.id, label: x.label, name: x.name.trim(), amount: Number(x.amount) || 0 })),
+          cashOuts: cashOuts.filter((c) => c.note.trim() || Number(c.amount)).map((c) => ({ id: c.id, note: c.note.trim(), amount: Number(c.amount) || 0 })),
         })}
       >
         <Check size={15} /> Save
