@@ -1845,6 +1845,66 @@ function EmptyState({ text }) {
   return <div style={{ color: "#8A9793", fontSize: 13, padding: "14px 0" }}>{text}</div>;
 }
 
+/* ---------------- Schedule status icons ---------------- */
+// Small at-a-glance badges on each schedule row: grey until it applies, colored once it does.
+function localDateOfISO(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return (iso || "").slice(0, 10);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+const STATUS_ICONS = [
+  { key: "rx", title: "Prescription issued", bg: "#E8EEF9", fg: "#2B4A8B" },
+  { key: "mask", title: "Face mask bought", bg: "#EDE9F7", fg: "#5B3FA0" },
+  { key: "mc", title: "MC paid", bg: "#FBF1DF", fg: "#8A5A12" },
+  { key: "consult", title: "Consult paid", bg: "#EAF3F1", fg: "#0F5E56" },
+  { key: "meds", title: "Medications paid", bg: "#E3F1FB", fg: "#1A5FA8" },
+];
+function StatusGlyph({ kind }) {
+  if (kind === "rx") return <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: -0.2 }}>Rx</span>;
+  if (kind === "mc") return <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: -0.2 }}>MC</span>;
+  if (kind === "consult") return <span style={{ fontSize: 13, fontWeight: 800, fontFamily: "Georgia, serif" }}>₱</span>;
+  if (kind === "meds") return <Pill size={14} />;
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 9c0-1 1-2 2-2h14c1 0 2 1 2 2v3c0 3-2 5-5 5h-1l-1 1h-2l-1-1H8c-3 0-5-2-5-5V9z" />
+      <path d="M3 10H1M21 10h2M8 12h8" />
+    </svg>
+  );
+}
+function StatusIcons({ flags }) {
+  return (
+    <span style={{ display: "inline-flex", gap: 5, marginRight: 6 }}>
+      {STATUS_ICONS.map((ic) => {
+        const on = !!flags[ic.key];
+        return (
+          <span
+            key={ic.key}
+            title={`${ic.title}${on ? "" : " — not yet"}`}
+            style={{
+              width: 24, height: 24, borderRadius: 7, display: "inline-flex", alignItems: "center", justifyContent: "center",
+              border: on ? "1px solid transparent" : "1px solid #E1E7E5",
+              background: on ? ic.bg : "#F7F8F7", color: on ? ic.fg : "#C3CCCA",
+            }}
+          >
+            <StatusGlyph kind={ic.key} />
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+function statusFlagsFor(appt, data) {
+  const pay = (data.payments || []).filter((p) => p.patientId === appt.patientId && p.date === appt.date);
+  const hasRx = (data.prescriptions || []).some((r) => r.patientId === appt.patientId && localDateOfISO(r.date) === appt.date);
+  return {
+    rx: hasRx,
+    mask: pay.some((p) => Number(p.masks) > 0),
+    mc: pay.some((p) => Number(p.mc) > 0),
+    consult: pay.some((p) => Number(p.consultAmt) > 0),
+    meds: pay.some((p) => Number(p.medsAmt) > 0),
+  };
+}
+
 /* ---------------- Schedule ---------------- */
 function Schedule({ data, persist, currentUser, showToast, onOpenPatient }) {
   const [showForm, setShowForm] = useState(false);
@@ -1897,6 +1957,7 @@ function Schedule({ data, persist, currentUser, showToast, onOpenPatient }) {
                   <span style={{ flex: 1, cursor: "pointer" }} onClick={() => p && onOpenPatient(p.id)}>
                     {p ? p.name : "Unknown patient"}
                   </span>
+                  <StatusIcons flags={statusFlagsFor(a, data)} />
                   <span style={styles.pill}>{a.reason || "Visit"}</span>
                   <span style={{ ...styles.pill, background: "#EAF3F1", color: "#0F5E56" }}>{a.provider}</span>
                   <button style={styles.iconBtn} onClick={() => removeAppt(a.id)} aria-label="Cancel">
@@ -5135,6 +5196,13 @@ function servicesTotal(p) {
 function rowTotal(p) {
   return servicesTotal(p) + (Number(p.medsAmt) || 0);
 }
+// Face masks are ₱5 each. They're tracked per patient (so the schedule can show who bought
+// one) but kept OUT of the row total and "total collected", exactly like the logbook, where
+// mask sales are added on separately at the end when working out the cash to turn over.
+const MASK_PRICE = 5;
+function maskAmount(p) {
+  return (Number(p.masks) || 0) * MASK_PRICE;
+}
 
 // Totals for one day's rows + that day's closing entries — the same arithmetic as the
 // logbook's total page. GCash and advance payments are both "not cash in the drawer today".
@@ -5146,7 +5214,9 @@ function summarizeDay(rows, closing) {
     if ((p.svcMethod || "cash") === "cash") consultCash += svc; else consultGcash += svc;
     if ((p.medsMethod || "cash") === "cash") medsCash += meds; else medsGcash += meds;
   }
-  const masks = Number(closing?.masksAmt) || 0;
+  // Mask sales = pieces logged on patient rows (×₱5) + any extra amount typed at day-end
+  // for masks sold to people who weren't logged as a patient.
+  const masks = rows.reduce((t, p) => t + maskAmount(p), 0) + (Number(closing?.masksAmt) || 0);
   const payouts = PAYOUT_SLOTS.map((slot) => {
     const found = (closing?.payouts || []).find((x) => x.id === slot.id);
     return { id: slot.id, label: slot.label, name: found?.name || "", amount: Number(found?.amount) || 0 };
@@ -5219,10 +5289,10 @@ function PaymentsPage({ data, persist, currentUser, showToast }) {
 
   function exportCsv() {
     const inRange = payments.filter((p) => p.date >= exportFrom && p.date <= exportTo).sort((a, b) => a.date.localeCompare(b.date) || (a.createdAt || "").localeCompare(b.createdAt || ""));
-    const head = ["Date", "Patient", "Consult fee", "MC", "UA", "Consult & services total", "Paid via", "Medications", "Meds paid via", "Row total", "Entered by"];
+    const head = ["Date", "Patient", "Consult fee", "MC", "UA", "Consult & services total", "Paid via", "Medications", "Meds paid via", "Row total", "Face masks (pcs)", "Face masks (₱)", "Entered by"];
     const lines = [head.map(csvCell).join(",")];
     for (const p of inRange) {
-      lines.push([p.date, patientName(p), p.consultAmt || 0, p.mc || 0, p.ua || 0, servicesTotal(p), methodLabel(p.svcMethod), p.medsAmt || 0, methodLabel(p.medsMethod), rowTotal(p), p.createdBy || ""].map(csvCell).join(","));
+      lines.push([p.date, patientName(p), p.consultAmt || 0, p.mc || 0, p.ua || 0, servicesTotal(p), methodLabel(p.svcMethod), p.medsAmt || 0, methodLabel(p.medsMethod), rowTotal(p), p.masks || 0, maskAmount(p), p.createdBy || ""].map(csvCell).join(","));
     }
     lines.push("");
     lines.push(["Daily summary"].map(csvCell).join(","));
@@ -5298,6 +5368,7 @@ function PaymentsPage({ data, persist, currentUser, showToast }) {
                   <th style={{ ...th, textAlign: "right" }}>Consult</th>
                   <th style={{ ...th, textAlign: "right" }}>MC / UA</th>
                   <th style={{ ...th, textAlign: "right" }}>Medications</th>
+                  <th style={{ ...th, textAlign: "right" }}>Face masks</th>
                   <th style={{ ...th, textAlign: "right" }}>Row total</th>
                   <th style={th}></th>
                 </tr>
@@ -5321,6 +5392,7 @@ function PaymentsPage({ data, persist, currentUser, showToast }) {
                       {p.medsAmt ? peso(p.medsAmt) : "—"}
                       {!!p.medsAmt && <span style={tag(p.medsMethod || "cash")}>{methodLabel(p.medsMethod)}</span>}
                     </td>
+                    <td style={{ ...td, ...num }}>{p.masks ? `${p.masks} pc${p.masks > 1 ? "s" : ""} · ${peso(maskAmount(p))}` : "—"}</td>
                     <td style={{ ...td, ...num, fontWeight: 700 }}>{peso(rowTotal(p))}</td>
                     <td style={{ ...td, whiteSpace: "nowrap", textAlign: "right" }}>
                       <button style={styles.iconBtn} onClick={() => setEditing(p)} aria-label="Edit"><Pencil size={14} /></button>
@@ -5362,7 +5434,7 @@ function PaymentsPage({ data, persist, currentUser, showToast }) {
                 <b style={{ ...styles.mono, color: "#B23B3B" }}>{peso(x.amount)}</b>
               </div>
             ))}
-            <div style={sumRow}><span>Face masks sold (₱5 each)</span><b style={styles.mono}>+{peso(sum.masks)}</b></div>
+            <div style={sumRow}><span>Face masks sold (₱5 each, added to cash)</span><b style={styles.mono}>+{peso(sum.masks)}</b></div>
             <div style={{ display: "flex", justifyContent: "space-between", background: "#0F2925", color: "#fff", borderRadius: 10, padding: "12px 14px", marginTop: 10, fontSize: 15, fontWeight: 700 }}>
               <span>Cash to turn over</span><span style={{ fontFamily: "IBM Plex Mono, monospace" }}>₱ {peso(sum.turnOver)}</span>
             </div>
@@ -5404,11 +5476,13 @@ function PaymentForm({ patients, initial, onSubmit }) {
   const [svcMethod, setSvcMethod] = useState(initial.svcMethod || "cash");
   const [medsAmt, setMedsAmt] = useState(initial.medsAmt ?? "");
   const [medsMethod, setMedsMethod] = useState(initial.medsMethod || "cash");
+  const [masks, setMasks] = useState(initial.masks ?? "");
 
   const consultNum = Number(consultAmt) || 0;
   const medsNum = Number(medsAmt) || 0;
   const total = consultNum + mc + (ua ? UA_FEE : 0) + medsNum;
-  const canSave = !!patientId && total > 0;
+  const masksNum = Math.max(0, Math.floor(Number(masks) || 0));
+  const canSave = !!patientId && (total > 0 || masksNum > 0);
 
   const methodPicker = (value, setValue) => (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -5453,6 +5527,11 @@ function PaymentForm({ patients, initial, onSubmit }) {
       </Field>
       {medsNum > 0 && <Field label="Medications paid via">{methodPicker(medsMethod, setMedsMethod)}</Field>}
 
+      <Field label={`Face masks bought (pieces) — ₱${MASK_PRICE} each, paid in cash`}>
+        <input type="number" min="0" step="1" inputMode="numeric" style={styles.input} value={masks} onChange={(e) => setMasks(e.target.value)} placeholder="leave blank if none" />
+        {masksNum > 0 && <div style={{ fontSize: 11.5, color: "#8A9793" }}>₱{peso(masksNum * MASK_PRICE)} — counted in the day's face-mask sales, not in the row total</div>}
+      </Field>
+
       <div style={{ display: "flex", justifyContent: "space-between", background: "#EAF3F1", borderRadius: 9, padding: "10px 12px", fontSize: 14, fontWeight: 700, color: "#12312D" }}>
         <span>Row total</span><span style={{ fontFamily: "IBM Plex Mono, monospace" }}>₱ {peso(total)}</span>
       </div>
@@ -5463,12 +5542,12 @@ function PaymentForm({ patients, initial, onSubmit }) {
         onClick={() => onSubmit({
           ...(initial.id ? { id: initial.id } : {}),
           patientId, consultAmt: consultNum, mc, ua: ua ? UA_FEE : 0, svcMethod,
-          medsAmt: medsNum, medsMethod,
+          medsAmt: medsNum, medsMethod, masks: masksNum,
         })}
       >
         <Check size={15} /> Save
       </button>
-      {!canSave && <div style={{ fontSize: 12, color: "#8A9793" }}>Pick a patient and enter at least one amount.</div>}
+      {!canSave && <div style={{ fontSize: 12, color: "#8A9793" }}>Pick a patient and enter at least one amount or face mask.</div>}
     </div>
   );
 }
@@ -5486,7 +5565,7 @@ function ClosingForm({ initial, onSubmit }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ fontSize: 12.5, color: "#5B6B68" }}>Entered fresh each day. These come out of the cash received.</div>
+      <div style={{ fontSize: 12.5, color: "#5B6B68" }}>Entered fresh each day. Payouts come out of the cash received. Face masks logged on patient rows are added automatically.</div>
       {payouts.map((x) => (
         <div key={x.id} style={{ display: "flex", gap: 8 }}>
           <Field label={x.label} style={{ flex: 1.4 }}>
@@ -5497,7 +5576,7 @@ function ClosingForm({ initial, onSubmit }) {
           </Field>
         </div>
       ))}
-      <Field label="Face masks sold today (₱) — ₱5 per mask">
+      <Field label="Extra face-mask sales not logged on a patient (₱)">
         <input type="number" min="0" inputMode="decimal" style={styles.input} value={masksAmt} onChange={(e) => setMasksAmt(e.target.value)} placeholder="e.g. 210" />
         {masksNum > 0 && <div style={{ fontSize: 11.5, color: "#8A9793" }}>≈ {Math.round(masksNum / 5)} masks</div>}
       </Field>
