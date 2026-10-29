@@ -984,6 +984,16 @@ export default function ClinicEMR() {
   const [view, setView] = useState("dashboard");
   const [selectedPatientId, setSelectedPatientId] = useState(null);
   const [toast, setToast] = useState(null);
+  // How many saves are in flight right now — drives the "Saving…" pill, and a warning if
+  // someone tries to close the tab before the save finishes.
+  const [savingCount, setSavingCount] = useState(0);
+  const isSaving = savingCount > 0;
+  useEffect(() => {
+    if (!isSaving) return undefined;
+    function warn(e) { e.preventDefault(); e.returnValue = ""; }
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [isSaving]);
 
   // Watch real login state (persists across refreshes, unlike the old name-picker).
   useEffect(() => {
@@ -1235,18 +1245,23 @@ export default function ClinicEMR() {
   // See saveWithConflictRetry (top of file) for how this actually stays safe with two
   // accounts saving at once.
   const persist = useCallback(async (next) => {
-    const stale = dataRef.current;
-    const result = await saveWithConflictRetry(stale, next);
-    if (!result.ok) {
-      showToast(
-        result.reason === "conflict"
-          ? "Save failed after several attempts — please try again."
-          : "Couldn't save — check your connection and try again. Nothing was saved."
-      );
-      return false;
+    setSavingCount((c) => c + 1);
+    try {
+      const stale = dataRef.current;
+      const result = await saveWithConflictRetry(stale, next);
+      if (!result.ok) {
+        showToast(
+          result.reason === "conflict"
+            ? "Save failed after several attempts — please try again."
+            : "Couldn't save — check your connection and try again. Nothing was saved."
+        );
+        return false;
+      }
+      setData(result.data);
+      return true;
+    } finally {
+      setSavingCount((c) => Math.max(0, c - 1));
     }
-    setData(result.data);
-    return true;
   }, []);
 
   const persistClinicInfo = useCallback(async (next) => {
@@ -1414,6 +1429,7 @@ export default function ClinicEMR() {
           )}
         </div>
       </main>
+      {isSaving && <SavingPill />}
       {toast && <div style={styles.toast}>{toast}</div>}
     </div>
   );
@@ -2501,8 +2517,9 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
         ? { ...p, history: [{ ...note, id: uid("note"), date: new Date().toISOString(), provider: currentUser.name }, ...(p.history || [])] }
         : p
     );
-    await persist(withAudit({ ...data, patients }, "chart_note_added", "Added a chart note"));
-    showToast("Chart note added");
+    const ok = await persist(withAudit({ ...data, patients }, "chart_note_added", "Added a chart note"));
+    if (ok) showToast("Chart note added");
+    return ok;
   }
 
   async function editNote(noteId, updates) {
@@ -2511,28 +2528,32 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
         ? { ...p, history: (p.history || []).map((h) => (h.id === noteId ? { ...h, ...updates } : h)) }
         : p
     );
-    await persist(withAudit({ ...data, patients }, "chart_note_edited", "Edited a chart note"));
-    showToast("Chart note updated");
+    const ok = await persist(withAudit({ ...data, patients }, "chart_note_edited", "Edited a chart note"));
+    if (ok) showToast("Chart note updated");
+    return ok;
   }
 
   async function addPlan(plan) {
     const treatmentPlans = [...data.treatmentPlans, { ...plan, id: uid("plan"), patientId: patient.id, date: new Date().toISOString(), provider: currentUser.name }];
-    await persist(withAudit({ ...data, treatmentPlans }, "treatment_plan_added", plan.assessment ? `Treatment plan: ${plan.assessment}` : "Added a treatment plan"));
-    showToast("Treatment plan saved");
+    const ok = await persist(withAudit({ ...data, treatmentPlans }, "treatment_plan_added", plan.assessment ? `Treatment plan: ${plan.assessment}` : "Added a treatment plan"));
+    if (ok) showToast("Treatment plan saved");
+    return ok;
   }
 
   async function editPlan(planId, updates) {
     const treatmentPlans = data.treatmentPlans.map((t) => (t.id === planId ? { ...t, ...updates } : t));
-    await persist(withAudit({ ...data, treatmentPlans }, "treatment_plan_edited", updates.assessment ? `Treatment plan edited: ${updates.assessment}` : "Edited a treatment plan"));
-    showToast("Treatment plan updated");
+    const ok = await persist(withAudit({ ...data, treatmentPlans }, "treatment_plan_edited", updates.assessment ? `Treatment plan edited: ${updates.assessment}` : "Edited a treatment plan"));
+    if (ok) showToast("Treatment plan updated");
+    return ok;
   }
 
   async function addRx(rxData) {
     const rxDate = new Date().toISOString();
     const prescriptions = [...data.prescriptions, { ...rxData, id: uid("rx"), patientId: patient.id, date: rxDate, provider: currentUser.name }];
     const { treatmentPlans, matched } = appendToSameDayPlan(data.treatmentPlans, patient.id, rxDate, formatMedsSection(rxData.meds));
-    await persist(withAudit({ ...data, prescriptions, treatmentPlans }, "prescription_created", `Prescription (${rxData.meds.length} medication${rxData.meds.length === 1 ? "" : "s"})`));
-    showToast(matched ? "Prescription created — added to today's treatment plan" : "Prescription created");
+    const ok = await persist(withAudit({ ...data, prescriptions, treatmentPlans }, "prescription_created", `Prescription (${rxData.meds.length} medication${rxData.meds.length === 1 ? "" : "s"})`));
+    if (ok) showToast(matched ? "Prescription created — added to today's treatment plan" : "Prescription created");
+    return ok;
   }
 
   async function editRx(rxId, updates) {
@@ -2541,20 +2562,23 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
     // which no longer applies once the medications change. Re-signing after an edit is required.
     const prescriptions = data.prescriptions.map((r) => (r.id === rxId ? { ...r, ...updates, signedBy: null, signedAt: null } : r));
     const { treatmentPlans, matched } = appendToSameDayPlan(data.treatmentPlans, patient.id, existing && existing.date, formatMedsSection(updates.meds));
-    await persist(withAudit({ ...data, prescriptions, treatmentPlans }, "prescription_edited", `Edited a prescription (${updates.meds.length} medication${updates.meds.length === 1 ? "" : "s"})`));
-    showToast(matched ? "Prescription updated — added to that day's treatment plan" : "Prescription updated");
+    const ok = await persist(withAudit({ ...data, prescriptions, treatmentPlans }, "prescription_edited", `Edited a prescription (${updates.meds.length} medication${updates.meds.length === 1 ? "" : "s"})`));
+    if (ok) showToast(matched ? "Prescription updated — added to that day's treatment plan" : "Prescription updated");
+    return ok;
   }
 
   async function addCertificate(certData) {
     const certificates = [...(data.certificates || []), { ...certData, id: uid("cert"), patientId: patient.id, date: new Date().toISOString(), provider: currentUser.name }];
-    await persist(withAudit({ ...data, certificates }, "certificate_created", "Issued a medical certificate"));
-    showToast("Medical certificate created");
+    const ok = await persist(withAudit({ ...data, certificates }, "certificate_created", "Issued a medical certificate"));
+    if (ok) showToast("Medical certificate created");
+    return ok;
   }
 
   async function addExam(examData) {
     const physicalExams = [...(data.physicalExams || []), { ...examData, id: uid("exam"), patientId: patient.id, date: new Date().toISOString(), provider: currentUser.name }];
-    await persist(withAudit({ ...data, physicalExams }, "physical_exam_saved", "Saved a physical exam report"));
-    showToast("Physical exam report saved");
+    const ok = await persist(withAudit({ ...data, physicalExams }, "physical_exam_saved", "Saved a physical exam report"));
+    if (ok) showToast("Physical exam report saved");
+    return ok;
   }
 
   async function addLabRequest(labData) {
@@ -2562,8 +2586,9 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
     const labRequests = [...(data.labRequests || []), { ...labData, id: uid("lab"), patientId: patient.id, date: labDate, provider: currentUser.name }];
     const count = labData.tests.length + labData.details.length;
     const { treatmentPlans, matched } = appendToSameDayPlan(data.treatmentPlans, patient.id, labDate, formatLabsSection(labData));
-    await persist(withAudit({ ...data, labRequests, treatmentPlans }, "lab_request_created", `Lab/diagnostic request (${count} item${count === 1 ? "" : "s"})`));
-    showToast(matched ? "Lab request saved — added to today's treatment plan" : "Lab & diagnostic request saved");
+    const ok = await persist(withAudit({ ...data, labRequests, treatmentPlans }, "lab_request_created", `Lab/diagnostic request (${count} item${count === 1 ? "" : "s"})`));
+    if (ok) showToast(matched ? "Lab request saved — added to today's treatment plan" : "Lab & diagnostic request saved");
+    return ok;
   }
 
   async function editLabRequest(labId, updates) {
@@ -2572,8 +2597,9 @@ function PatientDetail({ patient, data, persist, currentUser, showToast, clinicI
     const labRequests = (data.labRequests || []).map((l) => (l.id === labId ? { ...l, ...updates, signedBy: null, signedAt: null } : l));
     const count = updates.tests.length + updates.details.length;
     const { treatmentPlans, matched } = appendToSameDayPlan(data.treatmentPlans, patient.id, existing && existing.date, formatLabsSection(updates));
-    await persist(withAudit({ ...data, labRequests, treatmentPlans }, "lab_request_edited", `Edited a lab/diagnostic request (${count} item${count === 1 ? "" : "s"})`));
-    showToast(matched ? "Lab request updated — added to that day's treatment plan" : "Lab request updated");
+    const ok = await persist(withAudit({ ...data, labRequests, treatmentPlans }, "lab_request_edited", `Edited a lab/diagnostic request (${count} item${count === 1 ? "" : "s"})`));
+    if (ok) showToast(matched ? "Lab request updated — added to that day's treatment plan" : "Lab request updated");
+    return ok;
   }
 
   // Electronically signs a prescription, certificate, or lab request — only reachable by
@@ -2843,7 +2869,47 @@ function ActivityLogTab({ auditLog }) {
   );
 }
 
+// A small always-visible "Saving…" indicator. The clinic record is saved as one block, so a
+// save can take a few seconds on a slow connection; this makes it obvious the app is working
+// rather than frozen, and after a few seconds it says so plainly.
+function SavingPill() {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSlow(true), 4000);
+    return () => clearTimeout(t);
+  }, []);
+  return (
+    <div style={styles.savingPill} role="status" aria-live="polite">
+      <style>{`@keyframes aamc-spin { to { transform: rotate(360deg); } }`}</style>
+      <span style={styles.savingSpinner} />
+      <span>{slow ? "Still saving — slow connection. Please keep this page open." : "Saving…"}</span>
+    </div>
+  );
+}
+
+// Wraps a form's save so it (a) can't be double-clicked into creating two records, (b) shows
+// "Saving…" on the button, and (c) only closes/clears the form when the save really
+// succeeded — if it fails, whatever was typed is still there to try again.
+function useSaveGuard() {
+  const [saving, setSaving] = useState(false);
+  const lock = useRef(false);
+  const run = useCallback(async (fn, onSuccess) => {
+    if (lock.current) return;
+    lock.current = true;
+    setSaving(true);
+    try {
+      const ok = await fn();
+      if (ok !== false && onSuccess) onSuccess();
+    } finally {
+      lock.current = false;
+      setSaving(false);
+    }
+  }, []);
+  return [saving, run];
+}
+
 function ChartTab({ history, onAddNote, onEditNote }) {
+  const [saving, run] = useSaveGuard();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [note, setNote] = useState("");
@@ -2873,14 +2939,9 @@ function ChartTab({ history, onAddNote, onEditNote }) {
   }
 
   function save() {
-    if (!note.trim()) return;
+    if (!note.trim() || saving) return;
     const payload = { note: note.trim(), weight: weight.trim(), bp: bp.trim(), heartRate: heartRate.trim(), temp: temp.trim() };
-    if (editingId) {
-      onEditNote(editingId, payload);
-    } else {
-      onAddNote(payload);
-    }
-    resetForm();
+    run(() => (editingId ? onEditNote(editingId, payload) : onAddNote(payload)), resetForm);
   }
 
   return (
@@ -2911,8 +2972,8 @@ function ChartTab({ history, onAddNote, onEditNote }) {
             <textarea style={{ ...styles.input, minHeight: 80, fontFamily: "inherit" }} value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-            <button style={{ ...styles.primaryBtn, justifyContent: "center" }} onClick={save}>
-              <Check size={15} /> {editingId ? "Save changes" : "Save note"}
+            <button style={{ ...styles.primaryBtn, justifyContent: "center", ...(saving ? styles.btnBusy : {}) }} onClick={save} disabled={saving}>
+              {saving ? "Saving…" : <><Check size={15} /> {editingId ? "Save changes" : "Save note"}</>}
             </button>
             {editingId && (
               <button style={{ ...styles.linkBtn, padding: "9px 14px" }} onClick={resetForm}>Cancel</button>
@@ -2951,6 +3012,7 @@ function ChartTab({ history, onAddNote, onEditNote }) {
 }
 
 function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs, history, rx, labRequests, icdCodes }) {
+  const [saving, run] = useSaveGuard();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [subjective, setSubjective] = useState("");
@@ -2994,12 +3056,8 @@ function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs, history, rx, labR
       plan: plan.trim(),
       followUp: followUp.trim(),
     };
-    if (editingId) {
-      onEditPlan(editingId, payload);
-    } else {
-      onAddPlan(payload);
-    }
-    resetForm();
+    if (saving) return;
+    run(() => (editingId ? onEditPlan(editingId, payload) : onAddPlan(payload)), resetForm);
   }
 
   return (
@@ -3051,8 +3109,8 @@ function PlansTab({ plans, onAddPlan, onEditPlan, onOrderLabs, history, rx, labR
             <input style={styles.input} value={followUp} onChange={(e) => setFollowUp(e.target.value)} placeholder="e.g. Recheck in 2 weeks" />
           </Field>
           <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-            <button style={{ ...styles.primaryBtn, justifyContent: "center" }} onClick={save}>
-              <Check size={15} /> {editingId ? "Save changes" : "Save plan"}
+            <button style={{ ...styles.primaryBtn, justifyContent: "center", ...(saving ? styles.btnBusy : {}) }} onClick={save} disabled={saving}>
+              {saving ? "Saving…" : <><Check size={15} /> {editingId ? "Save changes" : "Save plan"}</>}
             </button>
             {editingId && (
               <button style={{ ...styles.linkBtn, padding: "9px 14px" }} onClick={resetForm}>Cancel</button>
@@ -3095,6 +3153,7 @@ function SoapLine({ label, text, bold }) {
 }
 
 function RxTab({ rx, onAddRx, onEditRx, isPeds, patient, clinicInfo, provider, commonMeds, rxTemplates, history, dosingRules, userRole, onSignDocument, hasPinSet }) {
+  const [saving, run] = useSaveGuard();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [meds, setMeds] = useState([{ name: "", qty: "", am: "", nn: "", pm: "", remarks: "", indication: "" }]);
@@ -3305,19 +3364,16 @@ function RxTab({ rx, onAddRx, onEditRx, isPeds, patient, clinicInfo, provider, c
           </Field>
           <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
             <button
-              style={{ ...styles.primaryBtn, justifyContent: "center" }}
+              style={{ ...styles.primaryBtn, justifyContent: "center", ...(saving ? styles.btnBusy : {}) }}
+              disabled={saving}
               onClick={() => {
                 const validMeds = meds.filter((m) => m.name.trim());
                 if (validMeds.length === 0) return;
-                if (editingId) {
-                  onEditRx(editingId, { meds: validMeds, notes: notes.trim() });
-                } else {
-                  onAddRx({ meds: validMeds, notes: notes.trim() });
-                }
-                resetForm();
+                if (saving) return;
+                run(() => (editingId ? onEditRx(editingId, { meds: validMeds, notes: notes.trim() }) : onAddRx({ meds: validMeds, notes: notes.trim() })), resetForm);
               }}
             >
-              <Check size={15} /> {editingId ? "Save changes" : "Save prescription"}
+              {saving ? "Saving…" : <><Check size={15} /> {editingId ? "Save changes" : "Save prescription"}</>}
             </button>
             {editingId && (
               <button style={{ ...styles.linkBtn, padding: "9px 14px" }} onClick={resetForm}>Cancel</button>
@@ -3537,6 +3593,7 @@ function FormsTab({ certs, exams, labRequests, onAddCertificate, onAddExam, onAd
 }
 
 function MedCertSection({ certs, onAddCertificate, patient, clinicInfo, provider, plans, icdCodes, userRole, onSignDocument, hasPinSet }) {
+  const [saving, run] = useSaveGuard();
   const [showForm, setShowForm] = useState(false);
   const [examDate, setExamDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [reason, setReason] = useState("");
@@ -3606,14 +3663,17 @@ function MedCertSection({ certs, onAddCertificate, patient, clinicInfo, provider
             <textarea style={{ ...styles.input, minHeight: 80, fontFamily: "inherit" }} value={recommendation} onChange={(e) => setRecommendation(e.target.value)} />
           </Field>
           <button
-            style={{ ...styles.primaryBtn, justifyContent: "center", marginTop: 6 }}
+            style={{ ...styles.primaryBtn, justifyContent: "center", marginTop: 6, ...(saving ? styles.btnBusy : {}) }}
+            disabled={saving}
             onClick={() => {
-              if (!reason.trim() && !assessment.trim()) return;
-              onAddCertificate({ examDate, reason: reason.trim(), assessment: assessment.trim(), recommendation: recommendation.trim() });
-              setReason(""); setAssessment(""); setRecommendation(""); setShowForm(false);
+              if (saving || (!reason.trim() && !assessment.trim())) return;
+              run(
+                () => onAddCertificate({ examDate, reason: reason.trim(), assessment: assessment.trim(), recommendation: recommendation.trim() }),
+                () => { setReason(""); setAssessment(""); setRecommendation(""); setShowForm(false); }
+              );
             }}
           >
-            <Check size={15} /> Save certificate
+            {saving ? "Saving…" : <><Check size={15} /> Save certificate</>}
           </button>
         </div>
       )}
@@ -3705,6 +3765,7 @@ function CheckGroup({ items, checked, onToggle, columns = 2 }) {
 
 /* ---------------- Physical Exam Report section ---------------- */
 function PhysicalExamSection({ exams, onAddExam, patient, clinicInfo, provider }) {
+  const [saving, run] = useSaveGuard();
   const [showForm, setShowForm] = useState(false);
   const [printExam, setPrintExam] = useState(null);
 
@@ -3766,6 +3827,7 @@ function PhysicalExamSection({ exams, onAddExam, patient, clinicInfo, provider }
   }, []);
 
   function resetAndSave() {
+    if (saving) return;
     const examData = {
       classification, classificationOther,
       lastName: lastName.trim(), firstName: firstName.trim(), middleName: middleName.trim(),
@@ -3779,8 +3841,7 @@ function PhysicalExamSection({ exams, onAddExam, patient, clinicInfo, provider }
       lmp, pregnant, pregnancyProblems: pregnancyProblems.trim(),
       presentMed, presentMedSpecify: presentMedSpecify.trim(), foodDrugAllergy: foodDrugAllergy.trim(),
     };
-    onAddExam(examData);
-    setShowForm(false);
+    run(() => onAddExam(examData), () => setShowForm(false));
   }
 
   return (
@@ -3939,8 +4000,8 @@ function PhysicalExamSection({ exams, onAddExam, patient, clinicInfo, provider }
             </div>
           </div>
 
-          <button style={{ ...styles.primaryBtn, justifyContent: "center", marginTop: 18 }} onClick={resetAndSave}>
-            <Check size={15} /> Save exam report
+          <button style={{ ...styles.primaryBtn, justifyContent: "center", marginTop: 18, ...(saving ? styles.btnBusy : {}) }} onClick={resetAndSave} disabled={saving}>
+            {saving ? "Saving…" : <><Check size={15} /> Save exam report</>}
           </button>
         </div>
       )}
@@ -4307,6 +4368,7 @@ function LabTemplateManager({ labTemplates, persistLabTemplates, onClose, showTo
 }
 
 function LabRequestSection({ labRequests, onAddLabRequest, onEditLabRequest, patient, clinicInfo, provider, autoOpen, onAutoOpened, labTemplates, persistLabTemplates, showToast, userRole, onSignDocument, hasPinSet }) {
+  const [saving, run] = useSaveGuard();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [checks, setChecks] = useState({});
@@ -4368,13 +4430,8 @@ function LabRequestSection({ labRequests, onAddLabRequest, onEditLabRequest, pat
   function saveRequest() {
     const testsChecked = LAB_TEST_CHECKLIST.filter((t) => checks[t]);
     const detailsChecked = LAB_TEST_WITH_DETAIL.filter((t) => detailChecks[t]).map((t) => ({ label: t, detail: (detailText[t] || "").trim() }));
-    if (testsChecked.length === 0 && detailsChecked.length === 0) return;
-    if (editingId) {
-      onEditLabRequest(editingId, { tests: testsChecked, details: detailsChecked });
-    } else {
-      onAddLabRequest({ tests: testsChecked, details: detailsChecked });
-    }
-    resetForm();
+    if (saving || (testsChecked.length === 0 && detailsChecked.length === 0)) return;
+    run(() => (editingId ? onEditLabRequest(editingId, { tests: testsChecked, details: detailsChecked }) : onAddLabRequest({ tests: testsChecked, details: detailsChecked })), resetForm);
   }
 
   return (
@@ -4426,8 +4483,8 @@ function LabRequestSection({ labRequests, onAddLabRequest, onEditLabRequest, pat
             onDetailTextChange={(l, v) => setDetailText((prev) => ({ ...prev, [l]: v }))}
             columns={3}
           />
-          <button style={{ ...styles.primaryBtn, justifyContent: "center", marginTop: 14 }} onClick={saveRequest}>
-            <Check size={15} /> {editingId ? "Save changes" : "Save request"}
+          <button style={{ ...styles.primaryBtn, justifyContent: "center", marginTop: 14, ...(saving ? styles.btnBusy : {}) }} onClick={saveRequest} disabled={saving}>
+            {saving ? "Saving…" : <><Check size={15} /> {editingId ? "Save changes" : "Save request"}</>}
           </button>
           {editingId && (
             <button style={{ ...styles.linkBtn, padding: "9px 14px", marginTop: 8 }} onClick={resetForm}>Cancel</button>
@@ -6065,6 +6122,9 @@ const styles = {
   suggestItem: { padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid #F1F4F3", color: "#12312D" },
   modalOverlay: { position: "fixed", inset: 0, background: "rgba(15,41,37,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 },
   modalCard: { background: "#fff", borderRadius: 14, padding: 22, width: 460, maxHeight: "85vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(15,45,40,0.2)" },
+  btnBusy: { opacity: 0.7, cursor: "wait" },
+  savingPill: { position: "fixed", top: 14, right: 18, zIndex: 1000, display: "flex", alignItems: "center", gap: 8, background: "#12312D", color: "#fff", padding: "8px 14px", borderRadius: 999, fontSize: 12.5, boxShadow: "0 6px 20px rgba(0,0,0,0.22)", maxWidth: "min(92vw, 360px)" },
+  savingSpinner: { width: 12, height: 12, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.35)", borderTopColor: "#fff", animation: "aamc-spin 0.8s linear infinite", flexShrink: 0 },
   toast: { position: "fixed", bottom: 22, left: "50%", transform: "translateX(-50%)", background: "#12312D", color: "#fff", padding: "10px 18px", borderRadius: 10, fontSize: 13, boxShadow: "0 8px 24px rgba(0,0,0,0.2)" },
   subNavRow: { display: "flex", gap: 8, marginBottom: 14 },
   subNavBtn: { background: "#F1F4F3", border: "1px solid #E4EAE8", color: "#5B6B68", borderRadius: 20, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" },
