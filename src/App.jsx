@@ -371,10 +371,66 @@ function PulseDivider() {
 }
 
 /* ---------------- Storage helpers ---------------- */
+// Remembers exactly which database version this session last saw (its updated_at) and the
+// data object that matches it. saveWithConflictRetry uses this to skip re-downloading the
+// whole ~4 MB record before every save when nobody else has saved in the meantime — the
+// write itself is still the same atomic "only if updated_at is unchanged" check, so this
+// changes how much is downloaded, not how safe the save is.
+let lastSynced = { updatedAt: null, data: null };
+
 async function loadClinicData() {
-  const { data, error } = await supabase.from("app_state").select("value").eq("key", "clinic-data").maybeSingle();
-  if (error) { console.error("loadClinicData failed", error); return emptyData(); }
-  return data ? { ...emptyData(), ...data.value } : emptyData();
+  const { data, error } = await supabase.from("app_state").select("value, updated_at").eq("key", "clinic-data").maybeSingle();
+  if (error) { console.error("loadClinicData failed", error); lastSynced = { updatedAt: null, data: null }; return emptyData(); }
+  const result = data ? { ...emptyData(), ...data.value } : emptyData();
+  lastSynced = data ? { updatedAt: data.updated_at, data: result } : { updatedAt: null, data: null };
+  return result;
+}
+
+// Audit log housekeeping. The activity log only ever grows and was about 30% of the whole
+// clinic-data record, so it was making every load and every save bigger for no benefit
+// during a normal day. Entries older than AUDIT_KEEP_DAYS are moved — never deleted — into
+// month-sized archive rows (audit-archive-YYYY-MM) that the app never downloads on its own.
+// An entry is only removed from the live record AFTER its archive write succeeded, and the
+// move happens in batches (AUDIT_TRIM_MIN_BATCH) so it isn't touching the archive on every save.
+const AUDIT_KEEP_DAYS = 60;
+const AUDIT_TRIM_MIN_BATCH = 150;
+
+function splitAuditLog(log, nowMs = Date.now()) {
+  const cutoff = new Date(nowMs - AUDIT_KEEP_DAYS * 86400000).toISOString();
+  const keep = [];
+  const old = [];
+  for (const entry of log || []) {
+    if (entry && typeof entry.date === "string" && entry.date < cutoff) old.push(entry);
+    else keep.push(entry);
+  }
+  return { keep, old };
+}
+
+async function archiveAuditEntries(entries) {
+  const byMonth = new Map();
+  for (const e of entries) {
+    const month = e.date.slice(0, 7); // YYYY-MM
+    if (!byMonth.has(month)) byMonth.set(month, []);
+    byMonth.get(month).push(e);
+  }
+  for (const [month, list] of byMonth) {
+    const archiveKey = `audit-archive-${month}`;
+    const { data: row, error: readError } = await supabase.from("app_state").select("value").eq("key", archiveKey).maybeSingle();
+    if (readError) { console.error("archiveAuditEntries: read failed", readError); return false; }
+    const existing = row && Array.isArray(row.value) ? row.value : [];
+    const byId = new Map(existing.map((x) => [x.id, x]));
+    for (const e of list) byId.set(e.id, e);
+    const { error: writeError } = await supabase.from("app_state").upsert({ key: archiveKey, value: Array.from(byId.values()), updated_at: new Date().toISOString() });
+    if (writeError) { console.error("archiveAuditEntries: write failed", writeError); return false; }
+  }
+  return true;
+}
+
+async function trimAuditLogIfNeeded(merged) {
+  const { keep, old } = splitAuditLog(merged.auditLog);
+  if (old.length < AUDIT_TRIM_MIN_BATCH) return merged;
+  const archived = await archiveAuditEntries(old);
+  return archived ? { ...merged, auditLog: keep } : merged; // if archiving failed, trim nothing
 }
 // Merges one field's new value against the freshest database copy. Every array in this
 // data model (patients, appointments, treatmentPlans, prescriptions, certificates,
@@ -452,22 +508,49 @@ function mergeRecord(freshRecord, staleRecord, nextRecord) {
 // prevents readers using loadClinicData meanwhile, only concurrent WRITERS collide, and
 // only that collision is what's being resolved here.
 async function saveWithConflictRetry(stale, next) {
+  // Fast path: if `stale` is exactly the copy this session last loaded or saved, and the
+  // database row still carries the updated_at we remember, nobody else has saved since — so
+  // there is nothing fresh to download and merge, and we can write straight away. The write
+  // is still the atomic "only if updated_at is unchanged" operation; if someone else DID
+  // save in the meantime it simply matches no row, and we fall through to the full
+  // read-merge-retry loop below, exactly as before.
+  if (lastSynced.updatedAt && lastSynced.data && stale === lastSynced.data) {
+    const mergedBase = { ...stale };
+    for (const key of Object.keys(next)) {
+      if (next[key] !== stale[key]) mergedBase[key] = mergeField(stale[key], stale[key], next[key]);
+    }
+    const merged = await trimAuditLogIfNeeded(mergedBase);
+    const nowIso = new Date().toISOString();
+    const { data: updatedRows, error: updateError } = await supabase
+      .from("app_state")
+      .update({ value: merged, updated_at: nowIso })
+      .eq("key", "clinic-data")
+      .eq("updated_at", lastSynced.updatedAt)
+      .select("updated_at");
+    if (updateError) { console.error("saveWithConflictRetry: fast update failed", updateError); return { ok: false, reason: "network" }; }
+    if (updatedRows && updatedRows.length > 0) {
+      lastSynced = { updatedAt: nowIso, data: merged };
+      return { ok: true, data: merged };
+    }
+    // Someone else saved first — continue into the full path below.
+  }
   for (let attempt = 0; attempt < 5; attempt++) {
     const { data: row, error: readError } = await supabase.from("app_state").select("value, updated_at").eq("key", "clinic-data").maybeSingle();
     if (readError) { console.error("saveWithConflictRetry: read failed", readError); return { ok: false, reason: "network" }; }
     const fresh = row ? { ...emptyData(), ...row.value } : emptyData();
     const expectedUpdatedAt = row ? row.updated_at : null;
-    const merged = { ...fresh };
+    const mergedBase = { ...fresh };
     for (const key of Object.keys(next)) {
-      if (next[key] !== stale[key]) merged[key] = mergeField(fresh[key], stale[key], next[key]);
+      if (next[key] !== stale[key]) mergedBase[key] = mergeField(fresh[key], stale[key], next[key]);
     }
+    const merged = await trimAuditLogIfNeeded(mergedBase);
     const nowIso = new Date().toISOString();
     if (expectedUpdatedAt === null) {
       // No row exists yet — create it. If another save creates it first in the meantime,
       // this fails on the key's uniqueness constraint; treat that as a conflict and retry
       // as a normal update on the next loop iteration.
       const { error: insertError } = await supabase.from("app_state").insert({ key: "clinic-data", value: merged, updated_at: nowIso });
-      if (!insertError) return { ok: true, data: merged };
+      if (!insertError) { lastSynced = { updatedAt: nowIso, data: merged }; return { ok: true, data: merged }; }
       if (insertError.code !== "23505") { console.error("saveWithConflictRetry: insert failed", insertError); return { ok: false, reason: "network" }; }
       continue;
     }
@@ -476,9 +559,9 @@ async function saveWithConflictRetry(stale, next) {
       .update({ value: merged, updated_at: nowIso })
       .eq("key", "clinic-data")
       .eq("updated_at", expectedUpdatedAt)
-      .select();
+      .select("updated_at");
     if (updateError) { console.error("saveWithConflictRetry: update failed", updateError); return { ok: false, reason: "network" }; }
-    if (updatedRows && updatedRows.length > 0) return { ok: true, data: merged };
+    if (updatedRows && updatedRows.length > 0) { lastSynced = { updatedAt: nowIso, data: merged }; return { ok: true, data: merged }; }
     // Someone else's write landed between our read and write attempt — loop and retry
     // against whatever is now actually there.
   }
@@ -2740,7 +2823,7 @@ function ActivityLogTab({ auditLog }) {
   return (
     <div>
       <div style={{ fontSize: 12.5, color: "#5B6B68", margin: "0 0 14px" }}>
-        A running record of who did what on this chart, and when — added automatically, can't be edited or deleted.
+        A running record of who did what on this chart, and when — added automatically, can't be edited or deleted. Shows the last 60 days; older activity is kept in the archive.
       </div>
       <SectionCard title={`Activity (${auditLog.length})`}>
         {auditLog.length === 0 ? (
